@@ -1,0 +1,636 @@
+// Package integration tests the full HTTP stack: routing → handler → service → DB interface.
+// All tests use FakeDB and FakeAdapter from testhelpers; no Docker or PostgreSQL required.
+package integration_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/tiendv89/workflow-backend/internal/database"
+	"github.com/tiendv89/workflow-backend/internal/domain"
+	"github.com/tiendv89/workflow-backend/internal/handler"
+	"github.com/tiendv89/workflow-backend/internal/service"
+	"github.com/tiendv89/workflow-backend/internal/testhelpers"
+)
+
+const (
+	wsID      = "11111111-1111-1111-1111-111111111111"
+	featureID = "workspace-data-backend"
+	taskID    = "T1"
+	repoURL   = "https://github.com/testorg/test-repo"
+)
+
+func newServer(db service.DatabaseReader, adp service.AdapterCaller) *httptest.Server {
+	gin.SetMode(gin.TestMode)
+	svc := service.New(db, adp, 30*time.Minute)
+	h := handler.New(svc)
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	api := r.Group("/api")
+	h.RegisterRoutes(api)
+	return httptest.NewServer(r)
+}
+
+func get(t *testing.T, srv *httptest.Server, path string) *http.Response {
+	t.Helper()
+	resp, err := http.Get(srv.URL + path)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	return resp
+}
+
+func post(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
+	t.Helper()
+	resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
+	return resp
+}
+
+// --- T5 scenario 1: first import — mocked adapter → DB → workspace read API ---
+
+func TestImport_FirstImport_201WithWorkspaceDetail(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "My Workspace", "my-workspace")
+	src := testhelpers.NewGitHubSource(wsID, repoURL)
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		GitHubSrcs: map[string]database.WorkspaceGitHubSource{wsID: src},
+	}
+	adp := &testhelpers.FakeAdapter{ImportedWorkspaceID: wsID}
+	srv := newServer(db, adp)
+	defer srv.Close()
+
+	resp := post(t, srv, "/api/workspaces/import",
+		`{"repo_url":"https://github.com/testorg/test-repo","name":"My Workspace"}`)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+	var detail domain.WorkspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if detail.ID != wsID {
+		t.Errorf("expected workspace ID %s, got %s", wsID, detail.ID)
+	}
+	if detail.Name != "My Workspace" {
+		t.Errorf("expected name 'My Workspace', got %q", detail.Name)
+	}
+	if detail.RepoURL != repoURL {
+		t.Errorf("expected repo_url %s, got %s", repoURL, detail.RepoURL)
+	}
+}
+
+func TestImport_MissingRepoURL_400(t *testing.T) {
+	db := &testhelpers.FakeDB{}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := post(t, srv, "/api/workspaces/import", `{}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+func TestImport_AdapterFailure_500WithErrorShape(t *testing.T) {
+	db := &testhelpers.FakeDB{}
+	adpErr := domain.NewAdapterError(domain.ErrAdapterInternal, "rpc unavailable")
+	srv := newServer(db, &testhelpers.FakeAdapter{ImportErr: adpErr})
+	defer srv.Close()
+
+	resp := post(t, srv, "/api/workspaces/import", `{"repo_url":"https://github.com/org/repo"}`)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("expected 500 for adapter error, got %d", resp.StatusCode)
+	}
+	var apiErr domain.APIError
+	json.NewDecoder(resp.Body).Decode(&apiErr)
+	if apiErr.Code != domain.ErrAdapterInternal {
+		t.Errorf("expected ErrAdapterInternal, got %s", apiErr.Code)
+	}
+}
+
+// --- T5 scenario 2: sync success — returns fresh (non-stale) data ---
+
+func TestSync_Success_200_FreshSourceState(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	successRun := testhelpers.NewSyncRun(wsID, "manual", "full_reconciliation", "success")
+	// Set finished_at to now so it falls within the stale threshold.
+	if err := successRun.FinishedAt.Scan(time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		SyncRuns:   []database.WorkspaceSyncRun{successRun},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := post(t, srv, "/api/workspaces/"+wsID+"/sync", "")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 on sync success, got %d", resp.StatusCode)
+	}
+	var detail domain.WorkspaceDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if detail.SourceState.Stale {
+		t.Error("expected stale=false after successful sync with recent run")
+	}
+}
+
+// --- T5 scenario 3: sync failure with stale cache --- returns 200 + stale data ---
+
+func TestSync_Failure_WithCache_Returns200_StaleData(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
+	syncErr := domain.NewAdapterError(domain.ErrAdapterTimeout, "adapter timeout")
+	srv := newServer(db, &testhelpers.FakeAdapter{SyncErr: syncErr})
+	defer srv.Close()
+
+	resp := post(t, srv, "/api/workspaces/"+wsID+"/sync", "")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with stale data, got %d", resp.StatusCode)
+	}
+	var detail domain.WorkspaceDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if !detail.SourceState.Stale {
+		t.Error("expected stale=true after sync failure with cached data")
+	}
+	if detail.SourceState.ErrorCode == "" {
+		t.Error("expected error_code in stale source state")
+	}
+}
+
+// --- T5 scenario 4: sync failure without cache — returns structured source error ---
+
+func TestSync_Failure_NoCache_ReturnsSourceError(t *testing.T) {
+	db := &testhelpers.FakeDB{} // no workspace in DB
+	syncErr := domain.NewAdapterError(domain.ErrAdapterTimeout, "adapter timeout")
+	srv := newServer(db, &testhelpers.FakeAdapter{SyncErr: syncErr})
+	defer srv.Close()
+
+	resp := post(t, srv, "/api/workspaces/"+wsID+"/sync", "")
+	resp.Body.Close()
+	if resp.StatusCode < 400 {
+		t.Errorf("expected error status for sync failure without cache, got %d", resp.StatusCode)
+	}
+}
+
+// --- T5 scenario 5: workspace list route ---
+
+func TestListWorkspaces_TwoWorkspaces_WithSourceState(t *testing.T) {
+	ws1 := testhelpers.NewWorkspace(wsID, "Workspace One", "workspace-one")
+	ws2 := testhelpers.NewWorkspace("22222222-2222-2222-2222-222222222222", "Workspace Two", "workspace-two")
+	successRun := testhelpers.NewSyncRun(wsID, "import", "full_reconciliation", "success")
+	src := testhelpers.NewGitHubSource(wsID, repoURL)
+
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws1, ws2},
+		SyncRuns:   []database.WorkspaceSyncRun{successRun},
+		GitHubSrcs: map[string]database.WorkspaceGitHubSource{wsID: src},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var workspaces []domain.WorkspaceSummary
+	json.NewDecoder(resp.Body).Decode(&workspaces)
+	if len(workspaces) != 2 {
+		t.Errorf("expected 2 workspaces, got %d", len(workspaces))
+	}
+
+	// Find workspace-one and verify source state.
+	var ws1Result *domain.WorkspaceSummary
+	for i := range workspaces {
+		if workspaces[i].ID == wsID {
+			ws1Result = &workspaces[i]
+		}
+	}
+	if ws1Result == nil {
+		t.Fatalf("workspace %s not found in response", wsID)
+	}
+	if ws1Result.RepoURL != repoURL {
+		t.Errorf("expected repo_url %s, got %s", repoURL, ws1Result.RepoURL)
+	}
+}
+
+// --- T5 scenario 5: workspace detail route ---
+
+func TestGetWorkspace_Detail_IncludesFeatureAndTaskSummaries(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Feature", "in_implementation", "in_implementation")
+	task := testhelpers.NewTask(wsID, featureID, taskID, "Task One", "done", []string{})
+	sr := testhelpers.NewSyncRun(wsID, "import", "full_reconciliation", "success")
+
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+		Tasks:      []database.WorkspaceTask{task},
+		SyncRuns:   []database.WorkspaceSyncRun{sr},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var detail domain.WorkspaceDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if detail.ID != wsID {
+		t.Errorf("expected ID %s, got %s", wsID, detail.ID)
+	}
+	if len(detail.Features) != 1 || detail.Features[0].FeatureID != featureID {
+		t.Errorf("expected feature %s, got %v", featureID, detail.Features)
+	}
+	if len(detail.Tasks) != 1 || detail.Tasks[0].TaskID != taskID {
+		t.Errorf("expected task %s, got %v", taskID, detail.Tasks)
+	}
+}
+
+func TestGetWorkspace_NotFound_404(t *testing.T) {
+	db := &testhelpers.FakeDB{}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
+	}
+	var apiErr domain.APIError
+	json.NewDecoder(resp.Body).Decode(&apiErr)
+	if apiErr.Code != domain.ErrDatabaseNotFound {
+		t.Errorf("expected ErrDatabaseNotFound, got %q", apiErr.Code)
+	}
+	if apiErr.Source != domain.ErrorSourceDatabase {
+		t.Errorf("expected source 'database', got %q", apiErr.Source)
+	}
+}
+
+// --- T5 scenario 5: feature detail route ---
+
+func TestGetFeature_Detail_IncludesDocumentsTasksActivity(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Feature", "in_implementation", "in_implementation")
+	doc := testhelpers.NewDocument(wsID, featureID, "product_spec",
+		"docs/features/workspace-data-backend/product-spec.md",
+		"https://github.com/testorg/test-repo/blob/main/docs/features/workspace-data-backend/product-spec.md")
+	task := testhelpers.NewTask(wsID, featureID, taskID, "T One", "done", []string{})
+	event := testhelpers.NewActivityEvent(wsID, featureID, taskID, "done", "agent@example.com", "done note", 0)
+
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+		Documents:  []database.WorkspaceFeatureDocument{doc},
+		Tasks:      []database.WorkspaceTask{task},
+		Activity:   []database.WorkspaceActivityEvent{event},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var detail domain.FeatureDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if detail.FeatureID != featureID {
+		t.Errorf("expected feature_id %s, got %s", featureID, detail.FeatureID)
+	}
+	if detail.WorkspaceID != wsID {
+		t.Errorf("expected workspace_id %s, got %s", wsID, detail.WorkspaceID)
+	}
+	if len(detail.Documents) != 1 || detail.Documents[0].DocumentType != "product_spec" {
+		t.Errorf("expected 1 document with type 'product_spec', got %v", detail.Documents)
+	}
+	if detail.Documents[0].URL == "" {
+		t.Error("expected non-empty document URL")
+	}
+	if len(detail.Tasks) != 1 {
+		t.Errorf("expected 1 task, got %d", len(detail.Tasks))
+	}
+	if len(detail.Activity) != 1 || detail.Activity[0].Action != "done" {
+		t.Errorf("expected 1 'done' activity event, got %v", detail.Activity)
+	}
+}
+
+func TestGetFeature_NotFound_404(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/nonexistent")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+// --- T5 scenario 5: feature tasks route ---
+
+func TestListFeatureTasks_ReturnsSummariesWithAllFields(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "done", []string{})
+	t2 := testhelpers.NewTask(wsID, featureID, "T2", "GitHub adapter", "in_progress", []string{"T1"})
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Tasks:      []database.WorkspaceTask{t1, t2},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureID+"/tasks")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var tasks []domain.TaskSummary
+	json.NewDecoder(resp.Body).Decode(&tasks)
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+	for _, task := range tasks {
+		if task.TaskID == "" || task.FeatureID == "" || task.Title == "" || task.Status == "" {
+			t.Errorf("task summary has empty required fields: %+v", task)
+		}
+	}
+}
+
+// --- T5 scenario 5: task detail route ---
+
+func TestGetTask_Detail_IncludesDependsOnExecutionActivity(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	task := testhelpers.NewTask(wsID, featureID, taskID, "Task One", "done", []string{"T0"})
+	event := testhelpers.NewActivityEvent(wsID, featureID, taskID, "done", "human@example.com", "Approved", 0)
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Tasks:      []database.WorkspaceTask{task},
+		Activity:   []database.WorkspaceActivityEvent{event},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks/"+taskID+"?featureId="+featureID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var detail domain.TaskDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if detail.TaskID != taskID {
+		t.Errorf("expected task_id %s, got %s", taskID, detail.TaskID)
+	}
+	if detail.WorkspaceID != wsID {
+		t.Errorf("expected workspace_id %s, got %s", wsID, detail.WorkspaceID)
+	}
+	if len(detail.DependsOn) != 1 || detail.DependsOn[0] != "T0" {
+		t.Errorf("expected depends_on [T0], got %v", detail.DependsOn)
+	}
+	if detail.Execution.ActorType != "agent" {
+		t.Errorf("expected actor_type 'agent', got %q", detail.Execution.ActorType)
+	}
+	if len(detail.Activity) != 1 {
+		t.Errorf("expected 1 activity event, got %d", len(detail.Activity))
+	}
+}
+
+func TestGetTask_NotFound_404(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks/T99?featureId="+featureID)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+// --- T5 scenario 5: activity route ---
+
+func TestListActivity_WorkspaceLevel_ReturnsEvents(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	ev1 := testhelpers.NewActivityEvent(wsID, featureID, taskID, "done", "agent@example.com", "note1", 0)
+	ev2 := testhelpers.NewActivityEvent(wsID, featureID, "", "ready", "orchestrator@example.com", "note2", 1)
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Activity:   []database.WorkspaceActivityEvent{ev1, ev2},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var events []domain.ActivityEvent
+	json.NewDecoder(resp.Body).Decode(&events)
+	if len(events) != 2 {
+		t.Errorf("expected 2 events, got %d", len(events))
+	}
+}
+
+func TestListActivity_WithFeatureFilter_200(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity?featureId="+featureID)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 with featureId filter, got %d", resp.StatusCode)
+	}
+}
+
+func TestListActivity_WorkspaceNotFound_404(t *testing.T) {
+	db := &testhelpers.FakeDB{}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for missing workspace, got %d", resp.StatusCode)
+	}
+}
+
+// --- Error response shape ---
+
+func TestErrorResponse_HasRequiredFields(t *testing.T) {
+	db := &testhelpers.FakeDB{}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID)
+	defer resp.Body.Close()
+
+	var apiErr domain.APIError
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if apiErr.Code == "" {
+		t.Error("error response must have a non-empty 'code' field")
+	}
+	if apiErr.Message == "" {
+		t.Error("error response must have a non-empty 'message' field")
+	}
+	if apiErr.Source == "" {
+		t.Error("error response must have a non-empty 'source' field")
+	}
+}
+
+// --- Backward-compatibility: /healthz not shadowed by workspace routes ---
+
+func TestHealthz_NotShadowedByWorkspaceRoutes(t *testing.T) {
+	db := &testhelpers.FakeDB{}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 from /healthz, got %d", resp.StatusCode)
+	}
+}
+
+// --- All eight routes are registered ---
+
+func TestAllWorkspaceRoutes_Registered(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "F", "in_design", "in_design")
+	task := testhelpers.NewTask(wsID, featureID, taskID, "T", "done", nil)
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+		Tasks:      []database.WorkspaceTask{task},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{ImportedWorkspaceID: wsID})
+	defer srv.Close()
+
+	routes := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/workspaces"},
+		{http.MethodGet, "/api/workspaces/" + wsID},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureID},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureID + "/tasks"},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/tasks/" + taskID + "?featureId=" + featureID},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/activity"},
+	}
+
+	for _, rt := range routes {
+		var resp *http.Response
+		if rt.method == http.MethodGet {
+			resp = get(t, srv, rt.path)
+		}
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound {
+			t.Errorf("route %s %s returned 404 — route not registered", rt.method, rt.path)
+		}
+	}
+}
+
+// --- Staleness signal ---
+
+func TestSourceState_Stale_WhenNoSyncRun(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID)
+	defer resp.Body.Close()
+
+	var detail domain.WorkspaceDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if !detail.SourceState.Stale {
+		t.Error("expected stale=true when workspace has never been synced")
+	}
+}
+
+func TestSourceState_NotStale_AfterRecentSuccessfulSync(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	sr := testhelpers.NewSyncRun(wsID, "import", "full_reconciliation", "success")
+	if err := sr.FinishedAt.Scan(time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		SyncRuns:   []database.WorkspaceSyncRun{sr},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID)
+	defer resp.Body.Close()
+
+	var detail domain.WorkspaceDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if detail.SourceState.Stale {
+		t.Error("expected stale=false after a recent successful sync")
+	}
+}
+
+func TestSourceState_Stale_AfterFailedSyncRun(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	failedRun := testhelpers.NewSyncRun(wsID, "manual", "full_reconciliation", "failed")
+	errCode := "GITHUB_RATE_LIMIT"
+	errMsg := "rate limit reached"
+	failedRun.ErrorCode = &errCode
+	failedRun.ErrorMessage = &errMsg
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		SyncRuns:   []database.WorkspaceSyncRun{failedRun},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID)
+	defer resp.Body.Close()
+
+	var detail domain.WorkspaceDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if !detail.SourceState.Stale {
+		t.Error("expected stale=true when latest sync run failed")
+	}
+	if detail.SourceState.ErrorCode != errCode {
+		t.Errorf("expected error_code %q, got %q", errCode, detail.SourceState.ErrorCode)
+	}
+}
