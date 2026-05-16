@@ -1,0 +1,439 @@
+package handler_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/tiendv89/workflow-backend/internal/adapter"
+	"github.com/tiendv89/workflow-backend/internal/database"
+	"github.com/tiendv89/workflow-backend/internal/domain"
+	"github.com/tiendv89/workflow-backend/internal/handler"
+	"github.com/tiendv89/workflow-backend/internal/service"
+)
+
+const handlerTestWSID = "22222222-2222-2222-2222-222222222222"
+
+// --- fakes (identical pattern to service tests) ---
+
+type fakeDB struct {
+	workspaces []database.Workspace
+	syncRuns   []database.WorkspaceSyncRun
+	features   []database.WorkspaceFeature
+	documents  []database.WorkspaceFeatureDocument
+	tasks      []database.WorkspaceTask
+	activity   []database.WorkspaceActivityEvent
+}
+
+func (f *fakeDB) ListWorkspaces(_ context.Context) ([]database.Workspace, error) {
+	return f.workspaces, nil
+}
+func (f *fakeDB) GetWorkspace(_ context.Context, workspaceID string) (database.Workspace, error) {
+	for _, w := range f.workspaces {
+		if database.UUIDString(w.ID) == workspaceID {
+			return w, nil
+		}
+	}
+	return database.Workspace{}, database.ErrNotFound
+}
+func (f *fakeDB) GetGitHubSource(_ context.Context, _ string) (database.WorkspaceGitHubSource, error) {
+	return database.WorkspaceGitHubSource{}, database.ErrNotFound
+}
+func (f *fakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database.WorkspaceSyncRun, error) {
+	return f.syncRuns, nil
+}
+func (f *fakeDB) GetLatestSyncRun(_ context.Context, _ string) (database.WorkspaceSyncRun, error) {
+	if len(f.syncRuns) > 0 {
+		return f.syncRuns[0], nil
+	}
+	return database.WorkspaceSyncRun{}, database.ErrNotFound
+}
+func (f *fakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database.WorkspaceFeature, error) {
+	return f.features, nil
+}
+func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
+	for _, feat := range f.features {
+		if feat.FeatureID == featureID {
+			return feat, nil
+		}
+	}
+	return database.WorkspaceFeature{}, database.ErrNotFound
+}
+func (f *fakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]database.WorkspaceFeatureDocument, error) {
+	return f.documents, nil
+}
+func (f *fakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.WorkspaceTask, error) {
+	return f.tasks, nil
+}
+func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
+	return f.tasks, nil
+}
+func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
+	for _, t := range f.tasks {
+		if t.FeatureID == featureID && t.TaskID == taskID {
+			return t, nil
+		}
+	}
+	return database.WorkspaceTask{}, database.ErrNotFound
+}
+func (f *fakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]database.WorkspaceActivityEvent, error) {
+	return f.activity, nil
+}
+
+type fakeAdapter struct {
+	importID  string
+	importErr error
+	syncErr   error
+}
+
+func (f *fakeAdapter) ImportWorkspace(_ context.Context, _ adapter.ImportRequest) (string, error) {
+	return f.importID, f.importErr
+}
+func (f *fakeAdapter) SyncWorkspace(_ context.Context, _ string) error {
+	return f.syncErr
+}
+
+// --- setup helpers ---
+
+func makeTestWorkspace(id string) database.Workspace {
+	var ws database.Workspace
+	ws.ID.Scan(id)
+	ws.Name = "Test Workspace"
+	ws.Slug = "test-workspace"
+	ws.UpdatedAt.Scan(time.Now())
+	return ws
+}
+
+func newTestRouter(db service.DatabaseReader, adp service.AdapterCaller) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	svc := service.New(db, adp, 30*time.Minute)
+	h := handler.New(svc)
+	r := gin.New()
+	api := r.Group("/api")
+	h.RegisterRoutes(api)
+	return r
+}
+
+// --- tests ---
+
+func TestListWorkspaces_200(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result []domain.WorkspaceSummary
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("expected 1 workspace, got %d", len(result))
+	}
+}
+
+func TestGetWorkspace_200(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var detail domain.WorkspaceDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if detail.ID != handlerTestWSID {
+		t.Errorf("expected workspace ID %s, got %s", handlerTestWSID, detail.ID)
+	}
+}
+
+func TestGetWorkspace_404(t *testing.T) {
+	db := &fakeDB{}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+
+	var apiErr domain.APIError
+	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if apiErr.Code != domain.ErrDatabaseNotFound {
+		t.Errorf("expected ErrDatabaseNotFound, got %s", apiErr.Code)
+	}
+}
+
+func TestImportWorkspace_201(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	r := newTestRouter(db, &fakeAdapter{importID: handlerTestWSID})
+
+	body := `{"repo_url":"https://github.com/org/repo"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/import", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestImportWorkspace_400_MissingBody(t *testing.T) {
+	db := &fakeDB{}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/import", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing repo_url, got %d", w.Code)
+	}
+}
+
+func TestImportWorkspace_AdapterError(t *testing.T) {
+	db := &fakeDB{}
+	adpErr := domain.NewAdapterError(domain.ErrAdapterInternal, "rpc failed")
+	r := newTestRouter(db, &fakeAdapter{importErr: adpErr})
+
+	body := `{"repo_url":"https://github.com/org/repo"}`
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/import", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 for adapter error, got %d", w.Code)
+	}
+}
+
+func TestSyncWorkspace_200_Success(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/"+handlerTestWSID+"/sync", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 on sync success, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestSyncWorkspace_200_StaleOnAdapterFailure(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	syncErr := domain.NewAdapterError(domain.ErrAdapterTimeout, "timeout")
+	r := newTestRouter(db, &fakeAdapter{syncErr: syncErr})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/"+handlerTestWSID+"/sync", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 with stale data, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var detail domain.WorkspaceDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !detail.SourceState.Stale {
+		t.Error("expected stale=true in response")
+	}
+}
+
+func TestGetFeature_200(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	status := "in_design"
+	feat := database.WorkspaceFeature{
+		FeatureID:     "feature-1",
+		Title:         "My Feature",
+		FeatureStatus: &status,
+	}
+	feat.WorkspaceID.Scan(handlerTestWSID)
+	feat.UpdatedAt.Scan(time.Now())
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
+	}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/feature-1", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetFeature_404(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/missing", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestListFeatureTasks_200(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	status := "ready"
+	task := database.WorkspaceTask{
+		FeatureID: "feature-1",
+		TaskID:    "T1",
+		Title:     "Task One",
+		Status:    &status,
+	}
+	task.WorkspaceID.Scan(handlerTestWSID)
+	task.UpdatedAt.Scan(time.Now())
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		tasks:      []database.WorkspaceTask{task},
+	}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/feature-1/tasks", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var tasks []domain.TaskSummary
+	if err := json.Unmarshal(w.Body.Bytes(), &tasks); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 task, got %d", len(tasks))
+	}
+}
+
+func TestGetTask_200(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	status := "in_progress"
+	task := database.WorkspaceTask{
+		FeatureID: "feature-1",
+		TaskID:    "T1",
+		Title:     "Task One",
+		Status:    &status,
+		DependsOn: []byte(`[]`),
+		Execution: []byte(`{"actor_type":"agent"}`),
+	}
+	task.WorkspaceID.Scan(handlerTestWSID)
+	task.UpdatedAt.Scan(time.Now())
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		tasks:      []database.WorkspaceTask{task},
+	}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/tasks/T1?featureId=feature-1", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetTask_404(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/tasks/T99?featureId=feature-1", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestListActivity_200(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/activity", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListActivity_404_WorkspaceNotFound(t *testing.T) {
+	db := &fakeDB{}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/activity", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestErrorResponseShape(t *testing.T) {
+	db := &fakeDB{}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
+	r.ServeHTTP(w, req)
+
+	var apiErr domain.APIError
+	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if apiErr.Code == "" {
+		t.Error("expected non-empty error code")
+	}
+	if apiErr.Message == "" {
+		t.Error("expected non-empty error message")
+	}
+	if apiErr.Source == "" {
+		t.Error("expected non-empty error source")
+	}
+}
