@@ -18,6 +18,7 @@ type DatabaseReader interface {
 	ListWorkspaces(ctx context.Context) ([]database.Workspace, error)
 	GetWorkspace(ctx context.Context, workspaceID string) (database.Workspace, error)
 	GetGitHubSource(ctx context.Context, workspaceID string) (database.WorkspaceGitHubSource, error)
+	ListGitHubSources(ctx context.Context) ([]database.WorkspaceGitHubSource, error)
 	ListLatestSyncRunsPerWorkspace(ctx context.Context) ([]database.WorkspaceSyncRun, error)
 	GetLatestSyncRun(ctx context.Context, workspaceID string) (database.WorkspaceSyncRun, error)
 	ListWorkspaceFeatures(ctx context.Context, workspaceID string) ([]database.WorkspaceFeature, error)
@@ -65,6 +66,13 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 		runMap[database.UUIDString(run.WorkspaceID)] = run
 	}
 
+	// Batch-load GitHub sources to avoid N+1 queries.
+	allSrcs, _ := s.db.ListGitHubSources(ctx)
+	srcMap := make(map[string]string, len(allSrcs))
+	for _, src := range allSrcs {
+		srcMap[database.UUIDString(src.WorkspaceID)] = src.RepoURL
+	}
+
 	out := make([]domain.WorkspaceSummary, 0, len(rows))
 	for _, r := range rows {
 		wsID := database.UUIDString(r.ID)
@@ -76,7 +84,7 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 			ss = domain.DeriveSourceState(nil, s.staleThreshold)
 		}
 
-		repoURL := s.githubRepoURL(ctx, wsID)
+		repoURL := srcMap[wsID]
 		out = append(out, domain.WorkspaceSummary{
 			ID:          wsID,
 			Name:        r.Name,

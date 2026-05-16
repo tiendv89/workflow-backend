@@ -50,6 +50,14 @@ func (f *fakeDB) GetGitHubSource(_ context.Context, workspaceID string) (databas
 	return database.WorkspaceGitHubSource{}, database.ErrNotFound
 }
 
+func (f *fakeDB) ListGitHubSources(_ context.Context) ([]database.WorkspaceGitHubSource, error) {
+	out := make([]database.WorkspaceGitHubSource, 0, len(f.githubSrcs))
+	for _, src := range f.githubSrcs {
+		out = append(out, src)
+	}
+	return out, nil
+}
+
 func (f *fakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database.WorkspaceSyncRun, error) {
 	return f.syncRuns, f.listRunsErr
 }
@@ -153,6 +161,28 @@ func TestListWorkspaces_Success(t *testing.T) {
 	}
 	if !result[0].SourceState.Stale {
 		t.Error("expected stale source state when no sync run exists")
+	}
+}
+
+func TestListWorkspaces_RepoURLBatchLoaded(t *testing.T) {
+	ws := makeUUID(testWSID)
+	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
+	src.WorkspaceID.Scan(testWSID)
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		githubSrcs: map[string]database.WorkspaceGitHubSource{testWSID: src},
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	result, err := svc.ListWorkspaces(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 workspace, got %d", len(result))
+	}
+	if result[0].RepoURL != "https://github.com/org/repo" {
+		t.Errorf("expected RepoURL 'https://github.com/org/repo', got %q", result[0].RepoURL)
 	}
 }
 

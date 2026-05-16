@@ -45,6 +45,9 @@ func (f *fakeDB) GetWorkspace(_ context.Context, workspaceID string) (database.W
 func (f *fakeDB) GetGitHubSource(_ context.Context, _ string) (database.WorkspaceGitHubSource, error) {
 	return database.WorkspaceGitHubSource{}, database.ErrNotFound
 }
+func (f *fakeDB) ListGitHubSources(_ context.Context) ([]database.WorkspaceGitHubSource, error) {
+	return nil, nil
+}
 func (f *fakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database.WorkspaceSyncRun, error) {
 	return f.syncRuns, nil
 }

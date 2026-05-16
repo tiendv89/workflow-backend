@@ -87,6 +87,27 @@ func (r *Reader) GetGitHubSource(ctx context.Context, workspaceID string) (Works
 	return s, nil
 }
 
+// ListGitHubSources returns all rows from workspace_github_sources.
+func (r *Reader) ListGitHubSources(ctx context.Context) ([]WorkspaceGitHubSource, error) {
+	const q = `
+		SELECT id, workspace_id, repo_url, repo_owner, repo_name, default_branch, created_at, updated_at
+		FROM workspace_github_sources`
+	rows, err := r.db.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WorkspaceGitHubSource
+	for rows.Next() {
+		var s WorkspaceGitHubSource
+		if err := rows.Scan(&s.ID, &s.WorkspaceID, &s.RepoURL, &s.RepoOwner, &s.RepoName, &s.DefaultBranch, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // ListLatestSyncRunsPerWorkspace returns one sync run per workspace (the most recent).
 func (r *Reader) ListLatestSyncRunsPerWorkspace(ctx context.Context) ([]WorkspaceSyncRun, error) {
 	const q = `
