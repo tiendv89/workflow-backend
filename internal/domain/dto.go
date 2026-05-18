@@ -46,6 +46,16 @@ type FeatureSearchQuery struct {
 	Limit  int
 }
 
+// TaskSearchQuery filters and controls feature task search results.
+type TaskSearchQuery struct {
+	TaskID string
+	Title  string
+	Status string
+	Repo   string
+	Sort   string
+	Limit  int
+}
+
 // WorkspaceSummary is the list-view representation of a workspace.
 type WorkspaceSummary struct {
 	ID          string      `json:"id"`
@@ -104,17 +114,19 @@ type FeatureDetail struct {
 
 // TaskSummary is the list-view representation of a task.
 type TaskSummary struct {
-	ID            string `json:"id"`
-	TaskID        string `json:"task_id"`
-	FeatureID     string `json:"feature_id"`
-	FeatureName   string `json:"feature_name"`
-	Title         string `json:"title"`
-	Status        string `json:"status"`
-	Repo          string `json:"repo,omitempty"`
-	Branch        string `json:"branch,omitempty"`
-	NextAction    string `json:"next_action,omitempty"`
-	IsBlocked     bool   `json:"is_blocked"`
-	BlockedReason string `json:"blocked_reason,omitempty"`
+	ID            string          `json:"id"`
+	TaskID        string          `json:"task_id"`
+	FeatureID     string          `json:"feature_id"`
+	FeatureName   string          `json:"feature_name"`
+	Title         string          `json:"title"`
+	Status        string          `json:"status"`
+	Repo          string          `json:"repo,omitempty"`
+	Branch        string          `json:"branch,omitempty"`
+	NextAction    string          `json:"next_action,omitempty"`
+	IsBlocked     bool            `json:"is_blocked"`
+	BlockedReason string          `json:"blocked_reason,omitempty"`
+	Pr            json.RawMessage `json:"pr"`
+	WorkspacePr   json.RawMessage `json:"workspace_pr"`
 }
 
 // ExecutionContext holds execution metadata for a task.

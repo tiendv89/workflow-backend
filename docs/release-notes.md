@@ -93,11 +93,13 @@ All routes are served by `api-service` under the `/api` prefix.
 |---|---|---|
 | `GET` | `/api/workspaces` | List all saved workspaces with source state. |
 | `POST` | `/api/workspaces/import` | Import a new workspace from a GitHub repo URL. Triggers a full reconciliation in `adapter-service`. |
-| `GET` | `/api/workspaces/:workspaceId` | Workspace detail: features, tasks, source state. |
+| `GET` | `/api/workspaces/:workspaceId` | Workspace detail: features and tasks. |
+| `GET` | `/api/workspaces/:workspaceId/search/features` | Search workspace features. Optional `?title=`, `?status=`, `?sort=`, and `?limit=` filters. |
 | `POST` | `/api/workspaces/:workspaceId/sync` | Trigger a manual full reconciliation. Returns the workspace detail (potentially stale on failure). |
 | `GET` | `/api/workspaces/:workspaceId/features/:featureId` | Feature detail: documents, tasks, activity, source state. |
 | `GET` | `/api/workspaces/:workspaceId/features/:featureId/tasks` | Task summaries for a feature. |
-| `GET` | `/api/workspaces/:workspaceId/tasks/:taskId` | Task detail: dependencies, execution context, PR refs, activity. Requires `?featureId=` query parameter. |
+| `GET` | `/api/workspaces/:workspaceId/features/:featureId/search/tasks` | Search tasks in a feature. Optional `?task_id=`, `?title=`, `?status=`, `?repo=`, `?sort=`, and `?limit=` filters. |
+| `GET` | `/api/workspaces/:workspaceId/features/:featureId/tasks/:taskId` | Task detail: dependencies, execution context, PR refs, activity. |
 | `GET` | `/api/workspaces/:workspaceId/activity` | Activity events for a workspace. Optional `?featureId=` and `?taskId=` filters. |
 
 Health check (root router, not under `/api`):

@@ -4,6 +4,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -14,6 +15,16 @@ import (
 // WorkspaceHandler holds a reference to the source service.
 type WorkspaceHandler struct {
 	svc *service.WorkspaceService
+}
+
+type workspaceDetailResponse struct {
+	ID        string                  `json:"id"`
+	Name      string                  `json:"name"`
+	Slug      string                  `json:"slug"`
+	RepoURL   string                  `json:"repo_url"`
+	UpdatedAt time.Time               `json:"updated_at"`
+	Features  []domain.FeatureSummary `json:"features"`
+	Tasks     []domain.TaskSummary    `json:"tasks"`
 }
 
 // New creates a new WorkspaceHandler.
@@ -27,6 +38,7 @@ func (h *WorkspaceHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.POST("/workspaces/import", h.ImportWorkspace)
 	rg.GET("/workspaces/:workspaceId", h.GetWorkspace)
 	rg.GET("/workspaces/:workspaceId/search/features", h.SearchFeatures)
+	rg.GET("/workspaces/:workspaceId/features/:featureId/search/tasks", h.SearchTasks)
 	rg.POST("/workspaces/:workspaceId/sync", h.SyncWorkspace)
 	rg.GET("/workspaces/:workspaceId/features/:featureId", h.GetFeature)
 	rg.GET("/workspaces/:workspaceId/features/:featureId/tasks", h.ListFeatureTasks)
@@ -78,7 +90,15 @@ func (h *WorkspaceHandler) GetWorkspace(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	c.JSON(http.StatusOK, workspaceDetailResponse{
+		ID:        detail.ID,
+		Name:      detail.Name,
+		Slug:      detail.Slug,
+		RepoURL:   detail.RepoURL,
+		UpdatedAt: detail.UpdatedAt,
+		Features:  detail.Features,
+		Tasks:     detail.Tasks,
+	})
 }
 
 // SearchFeatures godoc
@@ -101,6 +121,31 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, features)
+}
+
+// SearchTasks godoc
+// GET /api/workspaces/:workspaceId/features/:featureId/search/tasks?task_id=&title=&status=&repo=&sort=&limit=
+func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
+	workspaceID := c.Param("workspaceId")
+	featureID := c.Param("featureId")
+	limit, ok := parseLimit(c)
+	if !ok {
+		return
+	}
+
+	tasks, se := h.svc.SearchTasks(c.Request.Context(), workspaceID, featureID, domain.TaskSearchQuery{
+		TaskID: c.Query("task_id"),
+		Title:  c.Query("title"),
+		Status: c.Query("status"),
+		Repo:   c.Query("repo"),
+		Sort:   c.Query("sort"),
+		Limit:  limit,
+	})
+	if se != (domain.SourceError{}) {
+		respondSourceError(c, se, nil)
+		return
+	}
+	c.JSON(http.StatusOK, tasks)
 }
 
 // SyncWorkspace godoc

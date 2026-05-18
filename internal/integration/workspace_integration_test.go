@@ -419,6 +419,95 @@ func TestSearchFeatures_FiltersSortsAndLimits(t *testing.T) {
 	}
 }
 
+func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
+	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "done", []string{})
+	t2 := testhelpers.NewTask(wsID, featureID, "T2", "Adapter wiring", "in_progress", []string{"T1"})
+	t3 := testhelpers.NewTask(wsID, featureID, "T3", "Adapter cleanup", "in_progress", []string{"T2"})
+	t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	t3.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+		Tasks:      []database.WorkspaceTask{t1, t2, t3},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/search/tasks?title=adapter&status=in_progress&sort=title_desc&limit=1")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var tasks []domain.TaskSummary
+	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task after limit, got %d", len(tasks))
+	}
+	if tasks[0].TaskID != "T2" {
+		t.Errorf("expected T2 first for title_desc, got %s", tasks[0].TaskID)
+	}
+}
+
+func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
+	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "ready", []string{})
+	t2 := testhelpers.NewTask(wsID, featureID, "T2", "Adapter wiring", "ready", []string{"T1"})
+	t10 := testhelpers.NewTask(wsID, featureID, "T10", "Final verification", "ready", []string{"T2"})
+	t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	t10.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+		Tasks:      []database.WorkspaceTask{t1, t10, t2},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/search/tasks?sort=task_id_asc")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var tasks []domain.TaskSummary
+	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	got := []string{tasks[0].TaskID, tasks[1].TaskID, tasks[2].TaskID}
+	want := []string{"T1", "T2", "T10"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected task order %v, got %v", want, got)
+		}
+	}
+}
+
+func TestSearchTasks_InvalidLimit_400(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/search/tasks?limit=abc")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
 func TestSearchFeatures_InvalidLimit_400(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
@@ -620,7 +709,7 @@ func TestAllWorkspaceRoutes_Registered(t *testing.T) {
 
 // --- Staleness signal ---
 
-func TestSourceState_Stale_WhenNoSyncRun(t *testing.T) {
+func TestGetWorkspace_OmitsSourceState_WhenNoSyncRun(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
 	srv := newServer(db, &testhelpers.FakeAdapter{})
@@ -629,14 +718,16 @@ func TestSourceState_Stale_WhenNoSyncRun(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var detail domain.WorkspaceDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
-	if !detail.SourceState.Stale {
-		t.Error("expected stale=true when workspace has never been synced")
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := body["source_state"]; ok {
+		t.Error("expected source_state to be omitted from workspace detail response")
 	}
 }
 
-func TestSourceState_NotStale_AfterRecentSuccessfulSync(t *testing.T) {
+func TestGetWorkspace_OmitsSourceState_AfterRecentSuccessfulSync(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	sr := testhelpers.NewSyncRun(wsID, "import", "full_reconciliation", "success")
 	if err := sr.FinishedAt.Scan(time.Now().UTC()); err != nil {
@@ -652,14 +743,16 @@ func TestSourceState_NotStale_AfterRecentSuccessfulSync(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var detail domain.WorkspaceDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
-	if detail.SourceState.Stale {
-		t.Error("expected stale=false after a recent successful sync")
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := body["source_state"]; ok {
+		t.Error("expected source_state to be omitted from workspace detail response")
 	}
 }
 
-func TestSourceState_Stale_AfterFailedSyncRun(t *testing.T) {
+func TestGetWorkspace_OmitsSourceState_AfterFailedSyncRun(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	failedRun := testhelpers.NewSyncRun(wsID, "manual", "full_reconciliation", "failed")
 	errCode := "GITHUB_RATE_LIMIT"
@@ -676,12 +769,11 @@ func TestSourceState_Stale_AfterFailedSyncRun(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var detail domain.WorkspaceDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
-	if !detail.SourceState.Stale {
-		t.Error("expected stale=true when latest sync run failed")
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
 	}
-	if detail.SourceState.ErrorCode != errCode {
-		t.Errorf("expected error_code %q, got %q", errCode, detail.SourceState.ErrorCode)
+	if _, ok := body["source_state"]; ok {
+		t.Error("expected source_state to be omitted from workspace detail response")
 	}
 }

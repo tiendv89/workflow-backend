@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -324,6 +325,58 @@ func (f *FakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.Wo
 	return f.Tasks, nil
 }
 
+func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
+	for _, task := range f.Tasks {
+		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskID), strings.ToLower(filters.TaskID)) {
+			continue
+		}
+		if filters.Title != "" && !strings.Contains(strings.ToLower(task.Title), strings.ToLower(filters.Title)) {
+			continue
+		}
+		if filters.Status != "" && (task.Status == nil || *task.Status != filters.Status) {
+			continue
+		}
+		if filters.Repo != "" && (task.Repo == nil || *task.Repo != filters.Repo) {
+			continue
+		}
+		out = append(out, task)
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		switch filters.Sort {
+		case "task_id_desc":
+			return taskIDGreater(a.TaskID, b.TaskID)
+		case "title_asc":
+			return a.Title < b.Title
+		case "title_desc":
+			return a.Title > b.Title
+		case "status_asc":
+			return derefString(a.Status) < derefString(b.Status)
+		case "status_desc":
+			return derefString(a.Status) > derefString(b.Status)
+		case "repo_asc":
+			return derefString(a.Repo) < derefString(b.Repo)
+		case "repo_desc":
+			return derefString(a.Repo) > derefString(b.Repo)
+		case "updated_at_asc", "time_asc":
+			return a.UpdatedAt.Time.Before(b.UpdatedAt.Time)
+		case "updated_at_desc", "time_desc":
+			return a.UpdatedAt.Time.After(b.UpdatedAt.Time)
+		case "task_id_asc", "":
+			fallthrough
+		default:
+			return taskIDLess(a.TaskID, b.TaskID)
+		}
+	})
+
+	if filters.Limit > 0 && filters.Limit < len(out) {
+		out = out[:filters.Limit]
+	}
+	return out, nil
+}
+
 func (f *FakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
 	return f.Tasks, nil
 }
@@ -333,6 +386,38 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func taskIDLess(a, b string) bool {
+	an, aok := taskNumber(a)
+	bn, bok := taskNumber(b)
+	if aok && bok && an != bn {
+		return an < bn
+	}
+	if aok != bok {
+		return aok
+	}
+	return a < b
+}
+
+func taskIDGreater(a, b string) bool {
+	an, aok := taskNumber(a)
+	bn, bok := taskNumber(b)
+	if aok && bok && an != bn {
+		return an > bn
+	}
+	if aok != bok {
+		return aok
+	}
+	return a > b
+}
+
+func taskNumber(taskID string) (int, bool) {
+	if !strings.HasPrefix(taskID, "T") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(taskID, "T"))
+	return n, err == nil
 }
 
 func (f *FakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {

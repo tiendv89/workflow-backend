@@ -79,6 +79,22 @@ func (f *fakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]databas
 func (f *fakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.WorkspaceTask, error) {
 	return f.tasks, nil
 }
+func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		if filters.Title != "" && task.Title != filters.Title {
+			continue
+		}
+		if filters.Status != "" && (task.Status == nil || *task.Status != filters.Status) {
+			continue
+		}
+		out = append(out, task)
+	}
+	if filters.Limit > 0 && filters.Limit < len(out) {
+		out = out[:filters.Limit]
+	}
+	return out, nil
+}
 func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
 	return f.tasks, nil
 }

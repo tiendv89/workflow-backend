@@ -27,6 +27,16 @@ type FeatureSearchFilters struct {
 	Limit  int
 }
 
+// TaskSearchFilters contains optional filters and result controls for task search.
+type TaskSearchFilters struct {
+	TaskID string
+	Title  string
+	Status string
+	Repo   string
+	Sort   string
+	Limit  int
+}
+
 // NewReader creates a new Reader.
 func NewReader(db *Pool) *Reader {
 	return &Reader{db: db}
@@ -316,19 +326,103 @@ func (r *Reader) ListFeatureDocuments(ctx context.Context, workspaceID, featureI
 	return out, rows.Err()
 }
 
+// SearchFeatureTasks returns tasks for a feature filtered by task_id/title/status/repo with safe sorting and limiting.
+func (r *Reader) SearchFeatureTasks(ctx context.Context, workspaceID, featureID string, filters TaskSearchFilters) ([]WorkspaceTask, error) {
+	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	where := []string{"t.workspace_id = $1", "t.feature_id::text = $2"}
+	args := []interface{}{uid, featureID}
+	argPos := 3
+	if filters.TaskID != "" {
+		where = append(where, fmt.Sprintf("t.task_id ILIKE $%d", argPos))
+		args = append(args, "%"+filters.TaskID+"%")
+		argPos++
+	}
+	if filters.Title != "" {
+		where = append(where, fmt.Sprintf("t.title ILIKE $%d", argPos))
+		args = append(args, "%"+filters.Title+"%")
+		argPos++
+	}
+	if filters.Status != "" {
+		where = append(where, fmt.Sprintf("t.status = $%d", argPos))
+		args = append(args, filters.Status)
+		argPos++
+	}
+	if filters.Repo != "" {
+		where = append(where, fmt.Sprintf("t.repo = $%d", argPos))
+		args = append(args, filters.Repo)
+		argPos++
+	}
+
+	orderBy := taskIDOrderAsc("t")
+	switch filters.Sort {
+	case "task_id_desc":
+		orderBy = taskIDOrderDesc("t")
+	case "title_asc":
+		orderBy = "t.title ASC, " + taskIDOrderAsc("t")
+	case "title_desc":
+		orderBy = "t.title DESC, " + taskIDOrderAsc("t")
+	case "status_asc":
+		orderBy = "t.status ASC NULLS LAST, " + taskIDOrderAsc("t")
+	case "status_desc":
+		orderBy = "t.status DESC NULLS LAST, " + taskIDOrderAsc("t")
+	case "repo_asc":
+		orderBy = "t.repo ASC NULLS LAST, " + taskIDOrderAsc("t")
+	case "repo_desc":
+		orderBy = "t.repo DESC NULLS LAST, " + taskIDOrderAsc("t")
+	case "updated_at_asc", "time_asc":
+		orderBy = "t.updated_at ASC, " + taskIDOrderAsc("t")
+	case "updated_at_desc", "time_desc":
+		orderBy = "t.updated_at DESC, " + taskIDOrderAsc("t")
+	case "task_id_asc", "":
+		orderBy = taskIDOrderAsc("t")
+	}
+
+	limitClause := ""
+	if filters.Limit > 0 {
+		limitClause = fmt.Sprintf(" LIMIT $%d", argPos)
+		args = append(args, filters.Limit)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
+		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
+		FROM workspace_tasks t
+		WHERE %s
+		ORDER BY %s%s`, strings.Join(where, " AND "), orderBy, limitClause)
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WorkspaceTask
+	for rows.Next() {
+		var t WorkspaceTask
+		if err := scanTask(rows, &t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // ListFeatureTasks returns all tasks for a specific feature.
 func (r *Reader) ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]WorkspaceTask, error) {
 	uid, err := parseUUID(workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	const q = `
+	q := fmt.Sprintf(`
 		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
 		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
 		WHERE t.workspace_id = $1 AND t.feature_id::text = $2
-		ORDER BY t.task_id`
+		ORDER BY %s`, taskIDOrderAsc("t"))
 	rows, err := r.db.Query(ctx, q, uid, featureID)
 	if err != nil {
 		return nil, err
@@ -351,13 +445,13 @@ func (r *Reader) ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	const q = `
+	q := fmt.Sprintf(`
 		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
 		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
 		WHERE t.workspace_id = $1
-		ORDER BY t.feature_name, t.task_id`
+		ORDER BY t.feature_name, %s`, taskIDOrderAsc("t"))
 	rows, err := r.db.Query(ctx, q, uid)
 	if err != nil {
 		return nil, err
@@ -408,36 +502,14 @@ func (r *Reader) ListActivityEvents(ctx context.Context, workspaceID, featureID,
 	if err != nil {
 		return nil, err
 	}
-	var (
-		q    string
-		args []interface{}
-	)
-	switch {
-	case taskID != "" && featureID != "":
-		q = `
-			SELECT id, workspace_id, scope_type, feature_id, task_id, action, actor,
-			       occurred_at, note, sequence, raw_event, created_at
-			FROM workspace_activity_events
-			WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3
-			ORDER BY occurred_at DESC, sequence DESC`
-		args = []interface{}{uid, featureID, taskID}
-	case featureID != "":
-		q = `
-			SELECT id, workspace_id, scope_type, feature_id, task_id, action, actor,
-			       occurred_at, note, sequence, raw_event, created_at
-			FROM workspace_activity_events
-			WHERE workspace_id = $1 AND feature_id = $2
-			ORDER BY occurred_at DESC, sequence DESC`
-		args = []interface{}{uid, featureID}
-	default:
-		q = `
-			SELECT id, workspace_id, scope_type, feature_id, task_id, action, actor,
-			       occurred_at, note, sequence, raw_event, created_at
-			FROM workspace_activity_events
-			WHERE workspace_id = $1
-			ORDER BY occurred_at DESC, sequence DESC`
-		args = []interface{}{uid}
-	}
+	filterClause, filterArgs, _ := activityFilterClause(featureID, taskID, 2)
+	q := fmt.Sprintf(`
+		SELECT id, workspace_id, scope_type, feature_id, task_id, action, actor,
+		       occurred_at, note, sequence, raw_event, created_at
+		FROM workspace_activity_events
+		WHERE workspace_id = $1%s
+		ORDER BY occurred_at DESC, sequence DESC`, filterClause)
+	args := append([]interface{}{uid}, filterArgs...)
 
 	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
@@ -477,6 +549,39 @@ func parseUUID(s string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, fmt.Errorf("invalid UUID %q: %w", s, err)
 	}
 	return uid, nil
+}
+
+func taskIDOrderAsc(alias string) string {
+	return fmt.Sprintf("%s ASC NULLS LAST, %s.task_id ASC", taskIDNumberExpr(alias), alias)
+}
+
+func taskIDOrderDesc(alias string) string {
+	return fmt.Sprintf("%s DESC NULLS LAST, %s.task_id DESC", taskIDNumberExpr(alias), alias)
+}
+
+func taskIDNumberExpr(alias string) string {
+	col := alias + ".task_id"
+	return fmt.Sprintf("NULLIF(regexp_replace(%s, '^T([0-9]+)$', '\\1'), %s)::int", col, col)
+}
+
+func activityFilterClause(featureID, taskID string, firstArg int) (string, []interface{}, int) {
+	var where []string
+	var args []interface{}
+	argPos := firstArg
+	if featureID != "" {
+		where = append(where, fmt.Sprintf("(feature_id::text = $%d OR feature_name = $%d)", argPos, argPos))
+		args = append(args, featureID)
+		argPos++
+	}
+	if taskID != "" {
+		where = append(where, fmt.Sprintf("(task_id::text = $%d OR task_name = $%d)", argPos, argPos))
+		args = append(args, taskID)
+		argPos++
+	}
+	if len(where) == 0 {
+		return "", nil, argPos
+	}
+	return " AND " + strings.Join(where, " AND "), args, argPos
 }
 
 type rowScanner interface {

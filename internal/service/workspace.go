@@ -26,6 +26,7 @@ type DatabaseReader interface {
 	GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (database.WorkspaceFeature, error)
 	ListFeatureDocuments(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceFeatureDocument, error)
 	ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceTask, error)
+	SearchFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
 	ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]database.WorkspaceTask, error)
 	GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (database.WorkspaceTask, error)
 	ListActivityEvents(ctx context.Context, workspaceID, featureID, taskID string) ([]database.WorkspaceActivityEvent, error)
@@ -61,14 +62,20 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 	}
 
 	// Batch-load latest sync run per workspace to avoid N+1 queries.
-	allRuns, _ := s.db.ListLatestSyncRunsPerWorkspace(ctx)
+	allRuns, err := s.db.ListLatestSyncRunsPerWorkspace(ctx)
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
 	runMap := make(map[string]database.WorkspaceSyncRun, len(allRuns))
 	for _, run := range allRuns {
 		runMap[database.UUIDString(run.WorkspaceID)] = run
 	}
 
 	// Batch-load GitHub sources to avoid N+1 queries.
-	allSrcs, _ := s.db.ListGitHubSources(ctx)
+	allSrcs, err := s.db.ListGitHubSources(ctx)
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
 	srcMap := make(map[string]string, len(allSrcs))
 	for _, src := range allSrcs {
 		srcMap[database.UUIDString(src.WorkspaceID)] = src.RepoURL
@@ -373,6 +380,51 @@ func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, fe
 	return out, domain.SourceError{}
 }
 
+// SearchTasks returns task summaries for a feature filtered by task_id, title, status, and/or repo.
+func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, featureID string, query domain.TaskSearchQuery) ([]domain.TaskSummary, domain.SourceError) {
+	if query.Limit < 0 {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be greater than or equal to 0")
+	}
+	if query.Sort != "" && !isValidTaskSearchSort(query.Sort) {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of task_id_asc, task_id_desc, title_asc, title_desc, status_asc, status_desc, repo_asc, repo_desc, updated_at_asc, updated_at_desc, time_asc, time_desc")
+	}
+
+	ws, err := s.db.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+	wsID := database.UUIDString(ws.ID)
+
+	feat, err := s.db.GetWorkspaceFeature(ctx, wsID, featureID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("feature", featureID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, database.UUIDString(feat.ID), database.TaskSearchFilters{
+		TaskID: query.TaskID,
+		Title:  query.Title,
+		Status: query.Status,
+		Repo:   query.Repo,
+		Sort:   query.Sort,
+		Limit:  query.Limit,
+	})
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	out := make([]domain.TaskSummary, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, toTaskSummary(t))
+	}
+	return out, domain.SourceError{}
+}
+
 // SearchFeatures returns feature summaries for a workspace filtered by title and/or status.
 func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID string, query domain.FeatureSearchQuery) ([]domain.FeatureSummary, domain.SourceError) {
 	if query.Limit < 0 {
@@ -590,6 +642,8 @@ func toTaskSummary(t database.WorkspaceTask) domain.TaskSummary {
 		Branch:        derefStr(t.Branch),
 		IsBlocked:     isBlocked,
 		BlockedReason: derefStr(t.BlockedReason),
+		Pr:            rawJSONOrNil(t.Pr),
+		WorkspacePr:   rawJSONOrNil(t.WorkspacePr),
 	}
 }
 
@@ -613,6 +667,15 @@ func toActivityEvent(a database.WorkspaceActivityEvent) domain.ActivityEvent {
 func isValidSearchSort(sort string) bool {
 	switch sort {
 	case "title_asc", "title_desc", "status_asc", "status_desc", "updated_at_asc", "updated_at_desc", "time_asc", "time_desc":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidTaskSearchSort(sort string) bool {
+	switch sort {
+	case "task_id_asc", "task_id_desc", "title_asc", "title_desc", "status_asc", "status_desc", "repo_asc", "repo_desc", "updated_at_asc", "updated_at_desc", "time_asc", "time_desc":
 		return true
 	default:
 		return false

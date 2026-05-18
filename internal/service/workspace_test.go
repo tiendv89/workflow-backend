@@ -3,6 +3,9 @@ package service_test
 import (
 	"context"
 	"errors"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,12 +25,17 @@ type fakeDB struct {
 	tasks       []database.WorkspaceTask
 	activity    []database.WorkspaceActivityEvent
 	githubSrcs  map[string]database.WorkspaceGitHubSource
+	listWSErr   error
 	listRunsErr error
+	listSrcsErr error
 	getWSErr    error
 	getRunErr   error
 }
 
 func (f *fakeDB) ListWorkspaces(_ context.Context) ([]database.Workspace, error) {
+	if f.listWSErr != nil {
+		return nil, f.listWSErr
+	}
 	return f.workspaces, nil
 }
 
@@ -51,6 +59,9 @@ func (f *fakeDB) GetGitHubSource(_ context.Context, workspaceID string) (databas
 }
 
 func (f *fakeDB) ListGitHubSources(_ context.Context) ([]database.WorkspaceGitHubSource, error) {
+	if f.listSrcsErr != nil {
+		return nil, f.listSrcsErr
+	}
 	out := make([]database.WorkspaceGitHubSource, 0, len(f.githubSrcs))
 	for _, src := range f.githubSrcs {
 		out = append(out, src)
@@ -95,6 +106,33 @@ func (f *fakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]databas
 
 func (f *fakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.WorkspaceTask, error) {
 	return f.tasks, nil
+}
+
+func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		if filters.Title != "" && task.Title != filters.Title {
+			continue
+		}
+		if filters.Status != "" && (task.Status == nil || *task.Status != filters.Status) {
+			continue
+		}
+		out = append(out, task)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		switch filters.Sort {
+		case "task_id_desc":
+			return taskIDGreater(out[i].TaskID, out[j].TaskID)
+		case "task_id_asc", "":
+			return taskIDLess(out[i].TaskID, out[j].TaskID)
+		default:
+			return false
+		}
+	})
+	if filters.Limit > 0 && filters.Limit < len(out) {
+		out = out[:filters.Limit]
+	}
+	return out, nil
 }
 
 func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
@@ -148,6 +186,38 @@ func newService(db service.DatabaseReader, adp service.AdapterCaller) *service.W
 	return service.New(db, adp, 30*time.Minute)
 }
 
+func taskIDLess(a, b string) bool {
+	an, aok := taskNumber(a)
+	bn, bok := taskNumber(b)
+	if aok && bok && an != bn {
+		return an < bn
+	}
+	if aok != bok {
+		return aok
+	}
+	return a < b
+}
+
+func taskIDGreater(a, b string) bool {
+	an, aok := taskNumber(a)
+	bn, bok := taskNumber(b)
+	if aok && bok && an != bn {
+		return an > bn
+	}
+	if aok != bok {
+		return aok
+	}
+	return a > b
+}
+
+func taskNumber(taskID string) (int, bool) {
+	if !strings.HasPrefix(taskID, "T") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(taskID, "T"))
+	return n, err == nil
+}
+
 // --- tests ---
 
 func TestListWorkspaces_Success(t *testing.T) {
@@ -193,14 +263,40 @@ func TestListWorkspaces_RepoURLBatchLoaded(t *testing.T) {
 }
 
 func TestListWorkspaces_DBError(t *testing.T) {
-	db := &fakeDB{getWSErr: errors.New("db down")}
+	db := &fakeDB{listWSErr: errors.New("db down")}
 	svc := newService(db, &fakeAdapter{})
 
-	// ListWorkspaces uses its own internal query path, but we can simulate
-	// the error by overriding workspaces to trigger empty + no runs.
 	_, err := svc.ListWorkspaces(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error for empty list: %v", err)
+	if err == nil {
+		t.Fatal("expected database error")
+	}
+}
+
+func TestListWorkspaces_LatestSyncRunsError(t *testing.T) {
+	ws := makeUUID(testWSID)
+	db := &fakeDB{
+		workspaces:  []database.Workspace{ws},
+		listRunsErr: errors.New("sync run query failed"),
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	_, err := svc.ListWorkspaces(context.Background())
+	if err == nil {
+		t.Fatal("expected database error from latest sync runs query")
+	}
+}
+
+func TestListWorkspaces_GitHubSourcesError(t *testing.T) {
+	ws := makeUUID(testWSID)
+	db := &fakeDB{
+		workspaces:  []database.Workspace{ws},
+		listSrcsErr: errors.New("source query failed"),
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	_, err := svc.ListWorkspaces(context.Background())
+	if err == nil {
+		t.Fatal("expected database error from GitHub sources query")
 	}
 }
 
@@ -334,6 +430,49 @@ func TestGetTask_NotFound(t *testing.T) {
 	_, se := svc.GetTask(context.Background(), testWSID, testFeatureRowID, "99999999-9999-9999-9999-999999999999")
 	if se.Code != domain.ErrDatabaseNotFound {
 		t.Errorf("expected ErrDatabaseNotFound, got %s", se.Code)
+	}
+}
+
+func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
+	ws := makeUUID(testWSID)
+	feat := database.WorkspaceFeature{
+		FeatureID: "feature-1",
+		Title:     "Feature One",
+	}
+	feat.ID.Scan(testFeatureRowID)
+	feat.WorkspaceID.Scan(testWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	status := "ready"
+	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskID: "T1", Title: "Task One", Status: &status}
+	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskID: "T2", Title: "Task Two", Status: &status}
+	task10 := database.WorkspaceTask{FeatureName: "feature-1", TaskID: "T10", Title: "Task Ten", Status: &status}
+	task1.ID.Scan(testTaskRowID)
+	task2.ID.Scan("55555555-5555-5555-5555-555555555555")
+	task10.ID.Scan("66666666-6666-6666-6666-666666666666")
+	task1.FeatureID.Scan(testFeatureRowID)
+	task2.FeatureID.Scan(testFeatureRowID)
+	task10.FeatureID.Scan(testFeatureRowID)
+	task1.WorkspaceID.Scan(testWSID)
+	task2.WorkspaceID.Scan(testWSID)
+	task10.WorkspaceID.Scan(testWSID)
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
+		tasks:      []database.WorkspaceTask{task1, task10, task2},
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	tasks, se := svc.SearchTasks(context.Background(), testWSID, testFeatureRowID, domain.TaskSearchQuery{Sort: "task_id_asc"})
+	if se != (domain.SourceError{}) {
+		t.Fatalf("unexpected error: %v", se)
+	}
+	got := []string{tasks[0].TaskID, tasks[1].TaskID, tasks[2].TaskID}
+	want := []string{"T1", "T2", "T10"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected task order %v, got %v", want, got)
+		}
 	}
 }
 
