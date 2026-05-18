@@ -557,13 +557,24 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 
 	prRefs := parsePRRefs(t.Pr, t.WorkspacePr, t.FeatureName)
 
+	summary := toTaskSummary(t)
 	return &domain.TaskDetail{
-		TaskSummary: toTaskSummary(t),
-		WorkspaceID: workspaceID,
-		DependsOn:   dependsOn,
-		Execution:   execCtx,
-		PRRefs:      prRefs,
-		Activity:    activityEvents,
+		ID:            summary.ID,
+		TaskID:        summary.TaskID,
+		FeatureID:     summary.FeatureID,
+		FeatureName:   summary.FeatureName,
+		Title:         summary.Title,
+		Status:        summary.Status,
+		Repo:          summary.Repo,
+		Branch:        summary.Branch,
+		NextAction:    summary.NextAction,
+		IsBlocked:     summary.IsBlocked,
+		BlockedReason: summary.BlockedReason,
+		WorkspaceID:   workspaceID,
+		DependsOn:     dependsOn,
+		Execution:     execCtx,
+		PRRefs:        prRefs,
+		Activity:      activityEvents,
 	}, domain.SourceError{}
 }
 

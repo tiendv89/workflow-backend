@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	wsID         = "11111111-1111-1111-1111-111111111111"
+	wsID         = "7967eeca-892d-4d94-8cc0-7a552c2cbe87"
 	featureRowID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 	taskRowID    = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 	featureID    = "workspace-data-backend"
@@ -524,7 +524,7 @@ func TestSearchFeatures_InvalidLimit_400(t *testing.T) {
 
 // --- T5 scenario 5: task detail route ---
 
-func TestGetTask_Detail_IncludesDependsOnExecutionActivity(t *testing.T) {
+func TestGetTask_Detail_UsesUUIDFeatureAndTaskIDs(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
 	task := testhelpers.NewTask(wsID, featureID, taskID, "Task One", "done", []string{"T0"})
@@ -709,7 +709,7 @@ func TestAllWorkspaceRoutes_Registered(t *testing.T) {
 
 // --- Staleness signal ---
 
-func TestGetWorkspace_OmitsSourceState_WhenNoSyncRun(t *testing.T) {
+func TestGetWorkspace_IncludesStaleSourceState_WhenNoSyncRun(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
 	srv := newServer(db, &testhelpers.FakeAdapter{})
@@ -718,16 +718,16 @@ func TestGetWorkspace_OmitsSourceState_WhenNoSyncRun(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var body map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	var detail domain.WorkspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if _, ok := body["source_state"]; ok {
-		t.Error("expected source_state to be omitted from workspace detail response")
+	if !detail.SourceState.Stale {
+		t.Error("expected source_state.stale=true when no sync run exists")
 	}
 }
 
-func TestGetWorkspace_OmitsSourceState_AfterRecentSuccessfulSync(t *testing.T) {
+func TestGetWorkspace_IncludesFreshSourceState_AfterRecentSuccessfulSync(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	sr := testhelpers.NewSyncRun(wsID, "import", "full_reconciliation", "success")
 	if err := sr.FinishedAt.Scan(time.Now().UTC()); err != nil {
@@ -743,16 +743,19 @@ func TestGetWorkspace_OmitsSourceState_AfterRecentSuccessfulSync(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var body map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	var detail domain.WorkspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if _, ok := body["source_state"]; ok {
-		t.Error("expected source_state to be omitted from workspace detail response")
+	if detail.SourceState.Stale {
+		t.Error("expected source_state.stale=false after recent successful sync")
+	}
+	if detail.SourceState.LastSyncedAt == nil {
+		t.Error("expected source_state.last_synced_at after successful sync")
 	}
 }
 
-func TestGetWorkspace_OmitsSourceState_AfterFailedSyncRun(t *testing.T) {
+func TestGetWorkspace_IncludesStaleSourceState_AfterFailedSyncRun(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	failedRun := testhelpers.NewSyncRun(wsID, "manual", "full_reconciliation", "failed")
 	errCode := "GITHUB_RATE_LIMIT"
@@ -769,11 +772,14 @@ func TestGetWorkspace_OmitsSourceState_AfterFailedSyncRun(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var body map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	var detail domain.WorkspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if _, ok := body["source_state"]; ok {
-		t.Error("expected source_state to be omitted from workspace detail response")
+	if !detail.SourceState.Stale {
+		t.Error("expected source_state.stale=true after failed sync")
+	}
+	if detail.SourceState.ErrorCode != errCode {
+		t.Errorf("expected source_state.error_code %q, got %q", errCode, detail.SourceState.ErrorCode)
 	}
 }

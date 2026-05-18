@@ -189,6 +189,9 @@ func TestGetWorkspace_200(t *testing.T) {
 	if detail.ID != handlerTestWSID {
 		t.Errorf("expected workspace ID %s, got %s", handlerTestWSID, detail.ID)
 	}
+	if !detail.SourceState.Stale {
+		t.Error("expected stale source state when no sync run exists")
+	}
 }
 
 func TestGetWorkspace_404(t *testing.T) {

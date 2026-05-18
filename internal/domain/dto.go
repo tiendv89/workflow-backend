@@ -138,12 +138,22 @@ type ExecutionContext struct {
 
 // TaskDetail is the full task view.
 type TaskDetail struct {
-	TaskSummary
-	WorkspaceID string           `json:"workspace_id"`
-	DependsOn   []string         `json:"depends_on"`
-	Execution   ExecutionContext `json:"execution"`
-	PRRefs      []PullRequestRef `json:"pr_refs,omitempty"`
-	Activity    []ActivityEvent  `json:"activity"`
+	ID            string           `json:"id"`
+	TaskID        string           `json:"task_id"`
+	FeatureID     string           `json:"feature_id"`
+	FeatureName   string           `json:"feature_name"`
+	Title         string           `json:"title"`
+	Status        string           `json:"status"`
+	Repo          string           `json:"repo,omitempty"`
+	Branch        string           `json:"branch,omitempty"`
+	NextAction    string           `json:"next_action,omitempty"`
+	IsBlocked     bool             `json:"is_blocked"`
+	BlockedReason string           `json:"blocked_reason,omitempty"`
+	WorkspaceID   string           `json:"workspace_id"`
+	DependsOn     []string         `json:"depends_on"`
+	Execution     ExecutionContext `json:"execution"`
+	PRRefs        []PullRequestRef `json:"pr_refs,omitempty"`
+	Activity      []ActivityEvent  `json:"activity"`
 }
 
 // ImportInput is the request body for workspace import.

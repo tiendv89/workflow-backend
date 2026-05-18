@@ -98,8 +98,53 @@ func (c *Client) post(ctx context.Context, path string, body []byte) ([]byte, er
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, domain.NewAdapterError(domain.ErrAdapterInternal,
-			fmt.Sprintf("%s returned HTTP %d: %s", path, resp.StatusCode, string(data)))
+		return nil, decodeSourceErrorResponse(path, resp.StatusCode, data)
 	}
 	return data, nil
+}
+
+func decodeSourceErrorResponse(path string, statusCode int, data []byte) domain.SourceError {
+	var se domain.SourceError
+	if err := json.Unmarshal(data, &se); err == nil && se.Code != "" && se.Source != "" {
+		if se.Message == "" {
+			se.Message = fmt.Sprintf("adapter-service returned HTTP %d", statusCode)
+		}
+		return se
+	}
+
+	var apiErr domain.APIError
+	if err := json.Unmarshal(data, &apiErr); err == nil && apiErr.Code != "" && apiErr.Source != "" {
+		msg := apiErr.Message
+		if msg == "" {
+			msg = fmt.Sprintf("adapter-service returned HTTP %d", statusCode)
+		}
+		return domain.SourceError{
+			Code:      apiErr.Code,
+			Message:   msg,
+			Source:    apiErr.Source,
+			Retryable: apiErr.Retryable,
+		}
+	}
+
+	return sourceErrorFromHTTPStatus(path, statusCode, data)
+}
+
+func sourceErrorFromHTTPStatus(path string, statusCode int, data []byte) domain.SourceError {
+	message := fmt.Sprintf("adapter-service %s returned HTTP %d", path, statusCode)
+	if len(data) > 0 {
+		message = fmt.Sprintf("%s: %s", message, string(data))
+	}
+
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return domain.SourceError{Code: domain.ErrGitHubUnauthorized, Message: message, Source: domain.ErrorSourceGitHub, Retryable: false}
+	case http.StatusTooManyRequests:
+		return domain.SourceError{Code: domain.ErrGitHubRateLimit, Message: message, Source: domain.ErrorSourceGitHub, Retryable: true}
+	case http.StatusNotFound:
+		return domain.SourceError{Code: domain.ErrGitHubNotFound, Message: message, Source: domain.ErrorSourceGitHub, Retryable: false}
+	case http.StatusRequestTimeout, http.StatusGatewayTimeout:
+		return domain.SourceError{Code: domain.ErrAdapterTimeout, Message: message, Source: domain.ErrorSourceAdapter, Retryable: true}
+	default:
+		return domain.SourceError{Code: domain.ErrAdapterInternal, Message: message, Source: domain.ErrorSourceAdapter, Retryable: statusCode >= 500}
+	}
 }

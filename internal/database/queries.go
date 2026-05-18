@@ -273,10 +273,14 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 	return out, rows.Err()
 }
 
-// GetWorkspaceFeature returns a single feature.
+// GetWorkspaceFeature returns a single feature by internal row UUID.
 // Returns ErrNotFound if no row exists.
 func (r *Reader) GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (WorkspaceFeature, error) {
 	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return WorkspaceFeature{}, err
+	}
+	fid, err := parseUUID(featureID)
 	if err != nil {
 		return WorkspaceFeature{}, err
 	}
@@ -284,8 +288,8 @@ func (r *Reader) GetWorkspaceFeature(ctx context.Context, workspaceID, featureID
 		SELECT id, workspace_id, feature_id, title, feature_status, current_stage, next_action,
 		       stages, source_path, source_hash, created_at, updated_at
 		FROM workspace_features
-		WHERE workspace_id = $1 AND id::text = $2`
-	row := r.db.QueryRow(ctx, q, uid, featureID)
+		WHERE workspace_id = $1 AND id = $2`
+	row := r.db.QueryRow(ctx, q, uid, fid)
 	var f WorkspaceFeature
 	if err := row.Scan(
 		&f.ID, &f.WorkspaceID, &f.FeatureID, &f.Title, &f.FeatureStatus, &f.CurrentStage,
@@ -468,10 +472,18 @@ func (r *Reader) ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]
 	return out, rows.Err()
 }
 
-// GetWorkspaceTask returns a single task by workspace UUID, feature_id, and task row UUID.
+// GetWorkspaceTask returns a single task by workspace UUID, feature row UUID, and task row UUID.
 // Returns ErrNotFound if no row exists.
 func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (WorkspaceTask, error) {
 	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return WorkspaceTask{}, err
+	}
+	fid, err := parseUUID(featureID)
+	if err != nil {
+		return WorkspaceTask{}, err
+	}
+	tid, err := parseUUID(taskID)
 	if err != nil {
 		return WorkspaceTask{}, err
 	}
@@ -480,8 +492,8 @@ func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, t
 		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
-		WHERE t.workspace_id = $1 AND t.feature_id::text = $2 AND t.id::text = $3`
-	row := r.db.QueryRow(ctx, q, uid, featureID, taskID)
+		WHERE t.workspace_id = $1 AND t.feature_id = $2 AND t.id = $3`
+	row := r.db.QueryRow(ctx, q, uid, fid, tid)
 	var t WorkspaceTask
 	if err := row.Scan(
 		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.FeatureName, &t.TaskID, &t.Title, &t.Repo, &t.Status,
