@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/tiendv89/workflow-backend/internal/adapter"
@@ -88,6 +90,8 @@ func NewFeature(workspaceID, featureID, title, status, stage string) database.Wo
 	f.Title = title
 	f.FeatureStatus = &status
 	f.CurrentStage = &stage
+	stagesJSON, _ := json.Marshal([]map[string]string{{"id": stage, "status": status}})
+	f.Stages = stagesJSON
 	f.SourcePath = fmt.Sprintf("docs/features/%s/status.yaml", featureID)
 	if err := f.CreatedAt.Scan(FixedTime); err != nil {
 		panic(err)
@@ -107,7 +111,10 @@ func NewDocument(workspaceID, featureID, docType, sourcePath, url string) databa
 	if err := d.WorkspaceID.Scan(workspaceID); err != nil {
 		panic(err)
 	}
-	d.FeatureID = featureID
+	if err := d.FeatureID.Scan("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"); err != nil {
+		panic(err)
+	}
+	d.FeatureName = featureID
 	d.DocumentType = docType
 	d.SourcePath = sourcePath
 	d.URL = &url
@@ -129,7 +136,10 @@ func NewTask(workspaceID, featureID, taskID, title, status string, dependsOn []s
 	if err := t.WorkspaceID.Scan(workspaceID); err != nil {
 		panic(err)
 	}
-	t.FeatureID = featureID
+	if err := t.FeatureID.Scan("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"); err != nil {
+		panic(err)
+	}
+	t.FeatureName = featureID
 	t.TaskID = taskID
 	t.Title = title
 	t.Status = &status
@@ -191,13 +201,13 @@ func NewActivityEvent(workspaceID, featureID, taskID, action, actor, note string
 
 // FakeDB is a configurable in-memory fake of the DatabaseReader interface.
 type FakeDB struct {
-	Workspaces  []database.Workspace
-	SyncRuns    []database.WorkspaceSyncRun
-	Features    []database.WorkspaceFeature
-	Documents   []database.WorkspaceFeatureDocument
-	Tasks       []database.WorkspaceTask
-	Activity    []database.WorkspaceActivityEvent
-	GitHubSrcs  map[string]database.WorkspaceGitHubSource
+	Workspaces []database.Workspace
+	SyncRuns   []database.WorkspaceSyncRun
+	Features   []database.WorkspaceFeature
+	Documents  []database.WorkspaceFeatureDocument
+	Tasks      []database.WorkspaceTask
+	Activity   []database.WorkspaceActivityEvent
+	GitHubSrcs map[string]database.WorkspaceGitHubSource
 
 	// Error injection hooks.
 	ListWorkspacesErr error
@@ -259,9 +269,47 @@ func (f *FakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database.
 	return f.Features, nil
 }
 
+func (f *FakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, filters database.FeatureSearchFilters) ([]database.WorkspaceFeature, error) {
+	out := make([]database.WorkspaceFeature, 0, len(f.Features))
+	for _, feature := range f.Features {
+		if filters.Title != "" && !strings.Contains(strings.ToLower(feature.Title), strings.ToLower(filters.Title)) {
+			continue
+		}
+		if filters.Status != "" && (feature.FeatureStatus == nil || *feature.FeatureStatus != filters.Status) {
+			continue
+		}
+		out = append(out, feature)
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		switch filters.Sort {
+		case "title_asc":
+			return a.Title < b.Title
+		case "title_desc":
+			return a.Title > b.Title
+		case "status_asc":
+			return derefString(a.FeatureStatus) < derefString(b.FeatureStatus)
+		case "status_desc":
+			return derefString(a.FeatureStatus) > derefString(b.FeatureStatus)
+		case "updated_at_asc", "time_asc":
+			return a.UpdatedAt.Time.Before(b.UpdatedAt.Time)
+		case "updated_at_desc", "time_desc", "":
+			fallthrough
+		default:
+			return a.UpdatedAt.Time.After(b.UpdatedAt.Time)
+		}
+	})
+
+	if filters.Limit > 0 && filters.Limit < len(out) {
+		out = out[:filters.Limit]
+	}
+	return out, nil
+}
+
 func (f *FakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.Features {
-		if feat.FeatureID == featureID {
+		if database.UUIDString(feat.ID) == featureID {
 			return feat, nil
 		}
 	}
@@ -280,9 +328,16 @@ func (f *FakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.Wor
 	return f.Tasks, nil
 }
 
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
 func (f *FakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
 	for _, t := range f.Tasks {
-		if t.FeatureID == featureID && t.TaskID == taskID {
+		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.ID) == taskID {
 			return t, nil
 		}
 	}

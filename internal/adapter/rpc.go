@@ -24,7 +24,7 @@ func New(baseURL string) *Client {
 	return &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 30 * time.Second,
 		},
 	}
 }
@@ -36,13 +36,13 @@ type ImportRequest struct {
 	Name          string `json:"name,omitempty"`
 }
 
-// ImportResponse is the response from adapter-service after a successful import.
+// ImportResponse is the response from adapter-service after an import has been queued.
 type ImportResponse struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
 // ImportWorkspace calls POST /internal/workspaces/import on adapter-service.
-// Returns the new workspace ID on success.
+// Returns the workspace ID after the import sync task has been queued.
 func (c *Client) ImportWorkspace(ctx context.Context, req ImportRequest) (string, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -57,6 +57,9 @@ func (c *Client) ImportWorkspace(ctx context.Context, req ImportRequest) (string
 	var out ImportResponse
 	if err := json.Unmarshal(resp, &out); err != nil {
 		return "", fmt.Errorf("decode import response: %w", err)
+	}
+	if out.WorkspaceID == "" {
+		return "", fmt.Errorf("decode import response: missing workspace_id")
 	}
 	return out.WorkspaceID, nil
 }

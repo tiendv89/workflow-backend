@@ -33,6 +33,7 @@ const (
 
 	ErrValidationInvalidURL   ErrorCode = "VALIDATION_INVALID_URL"
 	ErrValidationMissingInput ErrorCode = "VALIDATION_MISSING_INPUT"
+	ErrValidationInvalidQuery ErrorCode = "VALIDATION_INVALID_QUERY"
 )
 
 // SourceError is the normalized error shape for all backend errors.

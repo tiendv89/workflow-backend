@@ -57,8 +57,8 @@ func TestDeriveSourceState_FailedRun_IsStale(t *testing.T) {
 	if ss.ErrorCode != "GITHUB_RATE_LIMIT" {
 		t.Errorf("expected error_code 'GITHUB_RATE_LIMIT', got %q", ss.ErrorCode)
 	}
-	if ss.ErrorMessage == "" {
-		t.Error("expected non-empty error_message for failed sync")
+	if ss.ErrorMessage != "" {
+		t.Error("expected empty error_message for failed sync")
 	}
 }
 

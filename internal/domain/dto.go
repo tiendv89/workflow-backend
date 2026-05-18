@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // SourceState describes the freshness and error state of a workspace's data.
 type SourceState struct {
@@ -35,6 +38,14 @@ type ActivityScope struct {
 	TaskID    string
 }
 
+// FeatureSearchQuery filters and controls workspace feature search results.
+type FeatureSearchQuery struct {
+	Title  string
+	Status string
+	Sort   string
+	Limit  int
+}
+
 // WorkspaceSummary is the list-view representation of a workspace.
 type WorkspaceSummary struct {
 	ID          string      `json:"id"`
@@ -54,12 +65,14 @@ type WorkspaceDetail struct {
 
 // FeatureSummary is the list-view representation of a feature.
 type FeatureSummary struct {
-	FeatureID    string     `json:"feature_id"`
-	Title        string     `json:"title"`
-	Status       string     `json:"status"`
-	CurrentStage string     `json:"current_stage,omitempty"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	TaskCounts   TaskCounts `json:"task_counts"`
+	ID           string          `json:"id"`
+	FeatureID    string          `json:"feature_id"`
+	Title        string          `json:"title"`
+	Status       string          `json:"status"`
+	CurrentStage string          `json:"current_stage,omitempty"`
+	Stages       json.RawMessage `json:"stages,omitempty"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	TaskCounts   TaskCounts      `json:"task_counts"`
 }
 
 // TaskCounts summarises task status distribution within a feature.
@@ -91,8 +104,10 @@ type FeatureDetail struct {
 
 // TaskSummary is the list-view representation of a task.
 type TaskSummary struct {
+	ID            string `json:"id"`
 	TaskID        string `json:"task_id"`
 	FeatureID     string `json:"feature_id"`
+	FeatureName   string `json:"feature_name"`
 	Title         string `json:"title"`
 	Status        string `json:"status"`
 	Repo          string `json:"repo,omitempty"`

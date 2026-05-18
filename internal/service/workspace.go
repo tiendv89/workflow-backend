@@ -22,6 +22,7 @@ type DatabaseReader interface {
 	ListLatestSyncRunsPerWorkspace(ctx context.Context) ([]database.WorkspaceSyncRun, error)
 	GetLatestSyncRun(ctx context.Context, workspaceID string) (database.WorkspaceSyncRun, error)
 	ListWorkspaceFeatures(ctx context.Context, workspaceID string) ([]database.WorkspaceFeature, error)
+	SearchWorkspaceFeatures(ctx context.Context, workspaceID string, filters database.FeatureSearchFilters) ([]database.WorkspaceFeature, error)
 	GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (database.WorkspaceFeature, error)
 	ListFeatureDocuments(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceFeatureDocument, error)
 	ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceTask, error)
@@ -97,8 +98,8 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 	return out, nil
 }
 
-// ImportWorkspace calls adapter-service to import a workspace then returns its detail.
-func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.ImportInput) (*domain.WorkspaceDetail, domain.SourceError) {
+// ImportWorkspace calls adapter-service to import a workspace then returns its summary.
+func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.ImportInput) (*domain.WorkspaceSummary, domain.SourceError) {
 	workspaceID, err := s.adapter.ImportWorkspace(ctx, adapter.ImportRequest{
 		RepoURL:       input.RepoURL,
 		DefaultBranch: input.DefaultBranch,
@@ -111,11 +112,40 @@ func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.Imp
 		return nil, domain.NewAdapterError(domain.ErrAdapterInternal, err.Error())
 	}
 
-	detail, dbErr := s.GetWorkspace(ctx, workspaceID)
+	summary, dbErr := s.GetWorkspaceSummary(ctx, workspaceID)
 	if dbErr != (domain.SourceError{}) {
 		return nil, dbErr
 	}
-	return detail, domain.SourceError{}
+	return summary, domain.SourceError{}
+}
+
+// GetWorkspaceSummary returns only basic workspace information without loading features/tasks.
+func (s *WorkspaceService) GetWorkspaceSummary(ctx context.Context, workspaceID string) (*domain.WorkspaceSummary, domain.SourceError) {
+	ws, err := s.db.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	wsID := database.UUIDString(ws.ID)
+	syncRun, err := s.db.GetLatestSyncRun(ctx, wsID)
+	var ss domain.SourceState
+	if errors.Is(err, database.ErrNotFound) || err != nil {
+		ss = domain.DeriveSourceState(nil, s.staleThreshold)
+	} else {
+		ss = toSourceState(&syncRun, s.staleThreshold)
+	}
+
+	return &domain.WorkspaceSummary{
+		ID:          wsID,
+		Name:        ws.Name,
+		Slug:        ws.Slug,
+		RepoURL:     s.githubRepoURL(ctx, wsID),
+		SourceState: ss,
+		UpdatedAt:   ws.UpdatedAt.Time,
+	}, domain.SourceError{}
 }
 
 // GetWorkspace returns full workspace detail with features, tasks, and source state.
@@ -143,12 +173,13 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 	// Count tasks per feature for FeatureSummary.
 	taskCountsByFeature := make(map[string]map[string]int)
 	for _, t := range tasks {
-		if _, ok := taskCountsByFeature[t.FeatureID]; !ok {
-			taskCountsByFeature[t.FeatureID] = make(map[string]int)
+		featureID := database.UUIDString(t.FeatureID)
+		if _, ok := taskCountsByFeature[featureID]; !ok {
+			taskCountsByFeature[featureID] = make(map[string]int)
 		}
-		taskCountsByFeature[t.FeatureID]["total"]++
+		taskCountsByFeature[featureID]["total"]++
 		if t.Status != nil {
-			taskCountsByFeature[t.FeatureID][*t.Status]++
+			taskCountsByFeature[featureID][*t.Status]++
 		}
 	}
 
@@ -162,12 +193,14 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 
 	featureSummaries := make([]domain.FeatureSummary, 0, len(features))
 	for _, f := range features {
-		counts := taskCountsByFeature[f.FeatureID]
+		counts := taskCountsByFeature[database.UUIDString(f.ID)]
 		featureSummaries = append(featureSummaries, domain.FeatureSummary{
+			ID:           database.UUIDString(f.ID),
 			FeatureID:    f.FeatureID,
 			Title:        f.Title,
 			Status:       derefStr(f.FeatureStatus),
 			CurrentStage: derefStr(f.CurrentStage),
+			Stages:       rawJSONOrNil(f.Stages),
 			UpdatedAt:    f.UpdatedAt.Time,
 			TaskCounts: domain.TaskCounts{
 				Total:      counts["total"],
@@ -218,7 +251,6 @@ func (s *WorkspaceService) SyncWorkspace(ctx context.Context, workspaceID string
 		detail.SourceState.Stale = true
 		if se, ok := err.(domain.SourceError); ok {
 			detail.SourceState.ErrorCode = string(se.Code)
-			detail.SourceState.ErrorMessage = se.Message
 		}
 		return detail, domain.SourceError{}
 	}
@@ -246,17 +278,19 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	docs, err := s.db.ListFeatureDocuments(ctx, wsID, featureID)
+	featureUUID := database.UUIDString(feat.ID)
+
+	docs, err := s.db.ListFeatureDocuments(ctx, wsID, featureUUID)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	tasks, err := s.db.ListFeatureTasks(ctx, wsID, featureID)
+	tasks, err := s.db.ListFeatureTasks(ctx, wsID, featureUUID)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	activity, err := s.db.ListActivityEvents(ctx, wsID, featureID, "")
+	activity, err := s.db.ListActivityEvents(ctx, wsID, featureUUID, "")
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -291,10 +325,12 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 
 	return &domain.FeatureDetail{
 		FeatureSummary: domain.FeatureSummary{
+			ID:           database.UUIDString(feat.ID),
 			FeatureID:    feat.FeatureID,
 			Title:        feat.Title,
 			Status:       derefStr(feat.FeatureStatus),
 			CurrentStage: derefStr(feat.CurrentStage),
+			Stages:       rawJSONOrNil(feat.Stages),
 			UpdatedAt:    feat.UpdatedAt.Time,
 			TaskCounts:   counts,
 		},
@@ -317,7 +353,15 @@ func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, fe
 	}
 	wsID := database.UUIDString(ws.ID)
 
-	tasks, err := s.db.ListFeatureTasks(ctx, wsID, featureID)
+	feat, err := s.db.GetWorkspaceFeature(ctx, wsID, featureID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("feature", featureID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	tasks, err := s.db.ListFeatureTasks(ctx, wsID, database.UUIDString(feat.ID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -325,6 +369,74 @@ func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, fe
 	out := make([]domain.TaskSummary, 0, len(tasks))
 	for _, t := range tasks {
 		out = append(out, toTaskSummary(t))
+	}
+	return out, domain.SourceError{}
+}
+
+// SearchFeatures returns feature summaries for a workspace filtered by title and/or status.
+func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID string, query domain.FeatureSearchQuery) ([]domain.FeatureSummary, domain.SourceError) {
+	if query.Limit < 0 {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be greater than or equal to 0")
+	}
+	if query.Sort != "" && !isValidSearchSort(query.Sort) {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of title_asc, title_desc, status_asc, status_desc, updated_at_asc, updated_at_desc, time_asc, time_desc")
+	}
+
+	ws, err := s.db.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+	wsID := database.UUIDString(ws.ID)
+
+	features, err := s.db.SearchWorkspaceFeatures(ctx, wsID, database.FeatureSearchFilters{
+		Title:  query.Title,
+		Status: query.Status,
+		Sort:   query.Sort,
+		Limit:  query.Limit,
+	})
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	tasks, err := s.db.ListWorkspaceTasks(ctx, wsID)
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+	taskCountsByFeature := make(map[string]map[string]int)
+	for _, t := range tasks {
+		featureID := database.UUIDString(t.FeatureID)
+		if _, ok := taskCountsByFeature[featureID]; !ok {
+			taskCountsByFeature[featureID] = make(map[string]int)
+		}
+		taskCountsByFeature[featureID]["total"]++
+		if t.Status != nil {
+			taskCountsByFeature[featureID][*t.Status]++
+		}
+	}
+
+	out := make([]domain.FeatureSummary, 0, len(features))
+	for _, f := range features {
+		counts := taskCountsByFeature[database.UUIDString(f.ID)]
+		out = append(out, domain.FeatureSummary{
+			ID:           database.UUIDString(f.ID),
+			FeatureID:    f.FeatureID,
+			Title:        f.Title,
+			Status:       derefStr(f.FeatureStatus),
+			CurrentStage: derefStr(f.CurrentStage),
+			Stages:       rawJSONOrNil(f.Stages),
+			UpdatedAt:    f.UpdatedAt.Time,
+			TaskCounts: domain.TaskCounts{
+				Total:      counts["total"],
+				Done:       counts["done"],
+				InProgress: counts["in_progress"],
+				Blocked:    counts["blocked"],
+				Ready:      counts["ready"],
+				Todo:       counts["todo"],
+			},
+		})
 	}
 	return out, domain.SourceError{}
 }
@@ -340,7 +452,15 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 	}
 	wsID := database.UUIDString(ws.ID)
 
-	t, err := s.db.GetWorkspaceTask(ctx, wsID, featureID, taskID)
+	feat, err := s.db.GetWorkspaceFeature(ctx, wsID, featureID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("feature", featureID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	t, err := s.db.GetWorkspaceTask(ctx, wsID, database.UUIDString(feat.ID), taskID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("task", taskID)
@@ -348,7 +468,7 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	activity, err := s.db.ListActivityEvents(ctx, wsID, featureID, taskID)
+	activity, err := s.db.ListActivityEvents(ctx, wsID, database.UUIDString(t.FeatureID), database.UUIDString(t.ID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -383,7 +503,7 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 		}
 	}
 
-	prRefs := parsePRRefs(t.Pr, t.WorkspacePr, t.FeatureID)
+	prRefs := parsePRRefs(t.Pr, t.WorkspacePr, t.FeatureName)
 
 	return &domain.TaskDetail{
 		TaskSummary: toTaskSummary(t),
@@ -460,8 +580,10 @@ func toSourceState(run *database.WorkspaceSyncRun, threshold time.Duration) doma
 func toTaskSummary(t database.WorkspaceTask) domain.TaskSummary {
 	isBlocked := t.Status != nil && *t.Status == "blocked"
 	return domain.TaskSummary{
+		ID:            database.UUIDString(t.ID),
 		TaskID:        t.TaskID,
-		FeatureID:     t.FeatureID,
+		FeatureID:     database.UUIDString(t.FeatureID),
+		FeatureName:   t.FeatureName,
 		Title:         t.Title,
 		Status:        derefStr(t.Status),
 		Repo:          derefStr(t.Repo),
@@ -486,6 +608,15 @@ func toActivityEvent(a database.WorkspaceActivityEvent) domain.ActivityEvent {
 		}
 	}
 	return e
+}
+
+func isValidSearchSort(sort string) bool {
+	switch sort {
+	case "title_asc", "title_desc", "status_asc", "status_desc", "updated_at_asc", "updated_at_desc", "time_asc", "time_desc":
+		return true
+	default:
+		return false
+	}
 }
 
 func countTasks(tasks []database.WorkspaceTask) domain.TaskCounts {
@@ -550,4 +681,11 @@ func derefStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func rawJSONOrNil(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" || !json.Valid(raw) {
+		return nil
+	}
+	return raw
 }

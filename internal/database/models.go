@@ -45,7 +45,8 @@ type WorkspaceFeature struct {
 type WorkspaceFeatureDocument struct {
 	ID           pgtype.UUID
 	WorkspaceID  pgtype.UUID
-	FeatureID    string
+	FeatureID    pgtype.UUID
+	FeatureName  string
 	DocumentType string
 	SourcePath   string
 	URL          *string
@@ -56,7 +57,8 @@ type WorkspaceFeatureDocument struct {
 type WorkspaceTask struct {
 	ID            pgtype.UUID
 	WorkspaceID   pgtype.UUID
-	FeatureID     string
+	FeatureID     pgtype.UUID
+	FeatureName   string
 	TaskID        string
 	Title         string
 	Repo          *string

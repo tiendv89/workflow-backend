@@ -20,10 +20,12 @@ import (
 )
 
 const (
-	wsID      = "11111111-1111-1111-1111-111111111111"
-	featureID = "workspace-data-backend"
-	taskID    = "T1"
-	repoURL   = "https://github.com/testorg/test-repo"
+	wsID         = "11111111-1111-1111-1111-111111111111"
+	featureRowID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	taskRowID    = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+	featureID    = "workspace-data-backend"
+	taskID       = "T1"
+	repoURL      = "https://github.com/testorg/test-repo"
 )
 
 func newServer(db service.DatabaseReader, adp service.AdapterCaller) *httptest.Server {
@@ -58,7 +60,7 @@ func post(t *testing.T, srv *httptest.Server, path, body string) *http.Response 
 
 // --- T5 scenario 1: first import — mocked adapter → DB → workspace read API ---
 
-func TestImport_FirstImport_201WithWorkspaceDetail(t *testing.T) {
+func TestImport_FirstImport_202WithWorkspaceDetail(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "My Workspace", "my-workspace")
 	src := testhelpers.NewGitHubSource(wsID, repoURL)
 	db := &testhelpers.FakeDB{
@@ -73,8 +75,8 @@ func TestImport_FirstImport_201WithWorkspaceDetail(t *testing.T) {
 		`{"repo_url":"https://github.com/testorg/test-repo","name":"My Workspace"}`)
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
 	var detail domain.WorkspaceDetail
 	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
@@ -265,6 +267,9 @@ func TestGetWorkspace_Detail_IncludesFeatureAndTaskSummaries(t *testing.T) {
 	if len(detail.Features) != 1 || detail.Features[0].FeatureID != featureID {
 		t.Errorf("expected feature %s, got %v", featureID, detail.Features)
 	}
+	if len(detail.Features[0].Stages) == 0 {
+		t.Error("expected feature stages to be included")
+	}
 	if len(detail.Tasks) != 1 || detail.Tasks[0].TaskID != taskID {
 		t.Errorf("expected task %s, got %v", taskID, detail.Tasks)
 	}
@@ -312,7 +317,7 @@ func TestGetFeature_Detail_IncludesDocumentsTasksActivity(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureID)
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -357,16 +362,18 @@ func TestGetFeature_NotFound_404(t *testing.T) {
 
 func TestListFeatureTasks_ReturnsSummariesWithAllFields(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
 	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "done", []string{})
 	t2 := testhelpers.NewTask(wsID, featureID, "T2", "GitHub adapter", "in_progress", []string{"T1"})
 	db := &testhelpers.FakeDB{
 		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
 		Tasks:      []database.WorkspaceTask{t1, t2},
 	}
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureID+"/tasks")
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -384,21 +391,65 @@ func TestListFeatureTasks_ReturnsSummariesWithAllFields(t *testing.T) {
 	}
 }
 
+func TestSearchFeatures_FiltersSortsAndLimits(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	f1 := testhelpers.NewFeature(wsID, "auth", "Auth UI", "done", "ship")
+	f2 := testhelpers.NewFeature(wsID, "adapter", "GitHub Adapter", "in_progress", "build")
+	f3 := testhelpers.NewFeature(wsID, "adapter-cleanup", "Adapter Cleanup", "in_progress", "build")
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{f1, f2, f3},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/search/features?title=adapter&status=in_progress&sort=title_asc&limit=1")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var features []domain.FeatureSummary
+	json.NewDecoder(resp.Body).Decode(&features)
+	if len(features) != 1 {
+		t.Fatalf("expected 1 feature, got %d", len(features))
+	}
+	if features[0].Title != "Adapter Cleanup" {
+		t.Errorf("expected first sorted feature to be Adapter Cleanup, got %q", features[0].Title)
+	}
+}
+
+func TestSearchFeatures_InvalidLimit_400(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/search/features?limit=abc")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
 // --- T5 scenario 5: task detail route ---
 
 func TestGetTask_Detail_IncludesDependsOnExecutionActivity(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
 	task := testhelpers.NewTask(wsID, featureID, taskID, "Task One", "done", []string{"T0"})
 	event := testhelpers.NewActivityEvent(wsID, featureID, taskID, "done", "human@example.com", "Approved", 0)
 	db := &testhelpers.FakeDB{
 		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
 		Tasks:      []database.WorkspaceTask{task},
 		Activity:   []database.WorkspaceActivityEvent{event},
 	}
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks/"+taskID+"?featureId="+featureID)
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks/"+taskRowID)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -429,7 +480,7 @@ func TestGetTask_NotFound_404(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks/T99?featureId="+featureID)
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks/99999999-9999-9999-9999-999999999999")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
@@ -549,9 +600,9 @@ func TestAllWorkspaceRoutes_Registered(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/workspaces"},
 		{http.MethodGet, "/api/workspaces/" + wsID},
-		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureID},
-		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureID + "/tasks"},
-		{http.MethodGet, "/api/workspaces/" + wsID + "/tasks/" + taskID + "?featureId=" + featureID},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureRowID},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureRowID + "/tasks"},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureRowID + "/tasks/" + taskRowID},
 		{http.MethodGet, "/api/workspaces/" + wsID + "/activity"},
 	}
 

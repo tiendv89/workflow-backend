@@ -19,6 +19,8 @@ import (
 )
 
 const handlerTestWSID = "22222222-2222-2222-2222-222222222222"
+const handlerTestFeatureRowID = "33333333-3333-3333-3333-333333333333"
+const handlerTestTaskRowID = "44444444-4444-4444-4444-444444444444"
 
 // --- fakes (identical pattern to service tests) ---
 
@@ -60,9 +62,12 @@ func (f *fakeDB) GetLatestSyncRun(_ context.Context, _ string) (database.Workspa
 func (f *fakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database.WorkspaceFeature, error) {
 	return f.features, nil
 }
+func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) ([]database.WorkspaceFeature, error) {
+	return f.features, nil
+}
 func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.features {
-		if feat.FeatureID == featureID {
+		if database.UUIDString(feat.ID) == featureID {
 			return feat, nil
 		}
 	}
@@ -77,9 +82,10 @@ func (f *fakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.Wo
 func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
 	return f.tasks, nil
 }
+
 func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
 	for _, t := range f.tasks {
-		if t.FeatureID == featureID && t.TaskID == taskID {
+		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.ID) == taskID {
 			return t, nil
 		}
 	}
@@ -190,7 +196,7 @@ func TestGetWorkspace_404(t *testing.T) {
 	}
 }
 
-func TestImportWorkspace_201(t *testing.T) {
+func TestImportWorkspace_202(t *testing.T) {
 	ws := makeTestWorkspace(handlerTestWSID)
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{importID: handlerTestWSID})
@@ -201,8 +207,8 @@ func TestImportWorkspace_201(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -281,6 +287,7 @@ func TestGetFeature_200(t *testing.T) {
 		Title:         "My Feature",
 		FeatureStatus: &status,
 	}
+	feat.ID.Scan(handlerTestFeatureRowID)
 	feat.WorkspaceID.Scan(handlerTestWSID)
 	feat.UpdatedAt.Scan(time.Now())
 
@@ -291,7 +298,7 @@ func TestGetFeature_200(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/feature-1", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID, nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -316,23 +323,33 @@ func TestGetFeature_404(t *testing.T) {
 func TestListFeatureTasks_200(t *testing.T) {
 	ws := makeTestWorkspace(handlerTestWSID)
 	status := "ready"
-	task := database.WorkspaceTask{
+	feat := database.WorkspaceFeature{
 		FeatureID: "feature-1",
-		TaskID:    "T1",
-		Title:     "Task One",
-		Status:    &status,
+		Title:     "Feature One",
 	}
+	feat.ID.Scan(handlerTestFeatureRowID)
+	feat.WorkspaceID.Scan(handlerTestWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	task := database.WorkspaceTask{
+		FeatureName: "feature-1",
+		TaskID:      "T1",
+		Title:       "Task One",
+		Status:      &status,
+	}
+	task.ID.Scan(handlerTestTaskRowID)
+	task.FeatureID.Scan(handlerTestFeatureRowID)
 	task.WorkspaceID.Scan(handlerTestWSID)
 	task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
 		tasks:      []database.WorkspaceTask{task},
 	}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/feature-1/tasks", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -351,25 +368,35 @@ func TestListFeatureTasks_200(t *testing.T) {
 func TestGetTask_200(t *testing.T) {
 	ws := makeTestWorkspace(handlerTestWSID)
 	status := "in_progress"
-	task := database.WorkspaceTask{
+	feat := database.WorkspaceFeature{
 		FeatureID: "feature-1",
-		TaskID:    "T1",
-		Title:     "Task One",
-		Status:    &status,
-		DependsOn: []byte(`[]`),
-		Execution: []byte(`{"actor_type":"agent"}`),
+		Title:     "Feature One",
 	}
+	feat.ID.Scan(handlerTestFeatureRowID)
+	feat.WorkspaceID.Scan(handlerTestWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	task := database.WorkspaceTask{
+		FeatureName: "feature-1",
+		TaskID:      "T1",
+		Title:       "Task One",
+		Status:      &status,
+		DependsOn:   []byte(`[]`),
+		Execution:   []byte(`{"actor_type":"agent"}`),
+	}
+	task.ID.Scan(handlerTestTaskRowID)
+	task.FeatureID.Scan(handlerTestFeatureRowID)
 	task.WorkspaceID.Scan(handlerTestWSID)
 	task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
 		tasks:      []database.WorkspaceTask{task},
 	}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/tasks/T1?featureId=feature-1", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks/"+handlerTestTaskRowID, nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -383,7 +410,7 @@ func TestGetTask_404(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/tasks/T99?featureId=feature-1", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks/T99", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {

@@ -76,9 +76,13 @@ func (f *fakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database.
 	return f.features, nil
 }
 
+func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) ([]database.WorkspaceFeature, error) {
+	return f.features, nil
+}
+
 func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.features {
-		if feat.FeatureID == featureID {
+		if database.UUIDString(feat.ID) == featureID {
 			return feat, nil
 		}
 	}
@@ -99,7 +103,7 @@ func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.Wor
 
 func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
 	for _, t := range f.tasks {
-		if t.FeatureID == featureID && t.TaskID == taskID {
+		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.ID) == taskID {
 			return t, nil
 		}
 	}
@@ -137,6 +141,8 @@ func makeUUID(hex string) database.Workspace {
 }
 
 const testWSID = "11111111-1111-1111-1111-111111111111"
+const testFeatureRowID = "33333333-3333-3333-3333-333333333333"
+const testTaskRowID = "44444444-4444-4444-4444-444444444444"
 
 func newService(db service.DatabaseReader, adp service.AdapterCaller) *service.WorkspaceService {
 	return service.New(db, adp, 30*time.Minute)
@@ -216,6 +222,7 @@ func TestGetWorkspace_Success(t *testing.T) {
 		Title:         "Feature One",
 		FeatureStatus: &status,
 	}
+	feat.ID.Scan(testFeatureRowID)
 	feat.WorkspaceID.Scan(testWSID)
 	feat.UpdatedAt.Scan(time.Now())
 
@@ -324,7 +331,7 @@ func TestGetTask_NotFound(t *testing.T) {
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	svc := newService(db, &fakeAdapter{})
 
-	_, se := svc.GetTask(context.Background(), testWSID, "feature-1", "T99")
+	_, se := svc.GetTask(context.Background(), testWSID, testFeatureRowID, "99999999-9999-9999-9999-999999999999")
 	if se.Code != domain.ErrDatabaseNotFound {
 		t.Errorf("expected ErrDatabaseNotFound, got %s", se.Code)
 	}
@@ -336,24 +343,34 @@ func TestGetTask_Success(t *testing.T) {
 	blocked := false
 	_ = blocked
 	taskStatus := &status
-	task := database.WorkspaceTask{
+	feat := database.WorkspaceFeature{
 		FeatureID: "feature-1",
-		TaskID:    "T1",
-		Title:     "My Task",
-		Status:    taskStatus,
-		DependsOn: []byte(`["T0"]`),
-		Execution: []byte(`{"actor_type":"agent"}`),
+		Title:     "Feature One",
 	}
+	feat.ID.Scan(testFeatureRowID)
+	feat.WorkspaceID.Scan(testWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	task := database.WorkspaceTask{
+		FeatureName: "feature-1",
+		TaskID:      "T1",
+		Title:       "My Task",
+		Status:      taskStatus,
+		DependsOn:   []byte(`["T0"]`),
+		Execution:   []byte(`{"actor_type":"agent"}`),
+	}
+	task.ID.Scan(testTaskRowID)
+	task.FeatureID.Scan(testFeatureRowID)
 	task.WorkspaceID.Scan(testWSID)
 	task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
 		tasks:      []database.WorkspaceTask{task},
 	}
 	svc := newService(db, &fakeAdapter{})
 
-	detail, se := svc.GetTask(context.Background(), testWSID, "feature-1", "T1")
+	detail, se := svc.GetTask(context.Background(), testWSID, testFeatureRowID, testTaskRowID)
 	if se != (domain.SourceError{}) {
 		t.Fatalf("unexpected error: %v", se)
 	}

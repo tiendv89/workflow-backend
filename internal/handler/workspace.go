@@ -3,6 +3,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -25,10 +26,11 @@ func (h *WorkspaceHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/workspaces", h.ListWorkspaces)
 	rg.POST("/workspaces/import", h.ImportWorkspace)
 	rg.GET("/workspaces/:workspaceId", h.GetWorkspace)
+	rg.GET("/workspaces/:workspaceId/search/features", h.SearchFeatures)
 	rg.POST("/workspaces/:workspaceId/sync", h.SyncWorkspace)
 	rg.GET("/workspaces/:workspaceId/features/:featureId", h.GetFeature)
 	rg.GET("/workspaces/:workspaceId/features/:featureId/tasks", h.ListFeatureTasks)
-	rg.GET("/workspaces/:workspaceId/tasks/:taskId", h.GetTask)
+	rg.GET("/workspaces/:workspaceId/features/:featureId/tasks/:taskId", h.GetTask)
 	rg.GET("/workspaces/:workspaceId/activity", h.ListActivity)
 }
 
@@ -62,7 +64,9 @@ func (h *WorkspaceHandler) ImportWorkspace(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusCreated, detail)
+	// Import is asynchronous: adapter-service persists a placeholder and enqueues
+	// a Redis sync task for adapter-worker to process.
+	c.JSON(http.StatusAccepted, detail)
 }
 
 // GetWorkspace godoc
@@ -75,6 +79,28 @@ func (h *WorkspaceHandler) GetWorkspace(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, detail)
+}
+
+// SearchFeatures godoc
+// GET /api/workspaces/:workspaceId/search/features?title=&status=&sort=&limit=
+func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
+	workspaceID := c.Param("workspaceId")
+	limit, ok := parseLimit(c)
+	if !ok {
+		return
+	}
+
+	features, se := h.svc.SearchFeatures(c.Request.Context(), workspaceID, domain.FeatureSearchQuery{
+		Title:  c.Query("title"),
+		Status: c.Query("status"),
+		Sort:   c.Query("sort"),
+		Limit:  limit,
+	})
+	if se != (domain.SourceError{}) {
+		respondSourceError(c, se, nil)
+		return
+	}
+	c.JSON(http.StatusOK, features)
 }
 
 // SyncWorkspace godoc
@@ -117,13 +143,11 @@ func (h *WorkspaceHandler) ListFeatureTasks(c *gin.Context) {
 }
 
 // GetTask godoc
-// GET /api/workspaces/:workspaceId/tasks/:taskId
+// GET /api/workspaces/:workspaceId/features/:featureId/tasks/:taskId
 func (h *WorkspaceHandler) GetTask(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
+	featureID := c.Param("featureId")
 	taskID := c.Param("taskId")
-	// The route uses :taskId only; featureId must be provided as a query param
-	// or embedded in the task record itself. For determinism, we require featureId.
-	featureID := c.Query("featureId")
 	detail, se := h.svc.GetTask(c.Request.Context(), workspaceID, featureID, taskID)
 	if se != (domain.SourceError{}) {
 		respondSourceError(c, se, nil)
@@ -163,6 +187,19 @@ func respondError(c *gin.Context, err error) {
 	})
 }
 
+func parseLimit(c *gin.Context) (int, bool) {
+	limit := 0
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil {
+			respondSourceError(c, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be an integer"), nil)
+			return 0, false
+		}
+		limit = parsed
+	}
+	return limit, true
+}
+
 func respondSourceError(c *gin.Context, se domain.SourceError, cachedData interface{}) {
 	statusCode := sourceErrorHTTPStatus(se)
 	c.JSON(statusCode, domain.FromSourceError(se, cachedData))
@@ -172,7 +209,7 @@ func sourceErrorHTTPStatus(se domain.SourceError) int {
 	switch se.Code {
 	case domain.ErrDatabaseNotFound, domain.ErrGitHubNotFound:
 		return http.StatusNotFound
-	case domain.ErrValidationInvalidURL, domain.ErrValidationMissingInput:
+	case domain.ErrValidationInvalidURL, domain.ErrValidationMissingInput, domain.ErrValidationInvalidQuery:
 		return http.StatusBadRequest
 	case domain.ErrGitHubUnauthorized:
 		return http.StatusUnauthorized

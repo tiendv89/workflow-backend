@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -16,6 +17,14 @@ var ErrNotFound = errors.New("not found")
 // All UUID parameters are accepted as hex strings and parsed internally.
 type Reader struct {
 	db *Pool
+}
+
+// FeatureSearchFilters contains optional filters and result controls for feature search.
+type FeatureSearchFilters struct {
+	Title  string
+	Status string
+	Sort   string
+	Limit  int
 }
 
 // NewReader creates a new Reader.
@@ -189,6 +198,71 @@ func (r *Reader) ListWorkspaceFeatures(ctx context.Context, workspaceID string) 
 	return out, rows.Err()
 }
 
+// SearchWorkspaceFeatures returns workspace features filtered by title/status with safe sorting and limiting.
+func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string, filters FeatureSearchFilters) ([]WorkspaceFeature, error) {
+	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	where := []string{"workspace_id = $1"}
+	args := []interface{}{uid}
+	argPos := 2
+	if filters.Title != "" {
+		where = append(where, fmt.Sprintf("title ILIKE $%d", argPos))
+		args = append(args, "%"+filters.Title+"%")
+		argPos++
+	}
+	if filters.Status != "" {
+		where = append(where, fmt.Sprintf("feature_status = $%d", argPos))
+		args = append(args, filters.Status)
+		argPos++
+	}
+
+	orderBy := "updated_at DESC, feature_id ASC"
+	switch filters.Sort {
+	case "title_asc":
+		orderBy = "title ASC, feature_id ASC"
+	case "title_desc":
+		orderBy = "title DESC, feature_id ASC"
+	case "status_asc":
+		orderBy = "feature_status ASC NULLS LAST, feature_id ASC"
+	case "status_desc":
+		orderBy = "feature_status DESC NULLS LAST, feature_id ASC"
+	case "updated_at_asc", "time_asc":
+		orderBy = "updated_at ASC, feature_id ASC"
+	case "updated_at_desc", "time_desc", "":
+		orderBy = "updated_at DESC, feature_id ASC"
+	}
+
+	limitClause := ""
+	if filters.Limit > 0 {
+		limitClause = fmt.Sprintf(" LIMIT $%d", argPos)
+		args = append(args, filters.Limit)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT id, workspace_id, feature_id, title, feature_status, current_stage, next_action,
+		       stages, source_path, source_hash, created_at, updated_at
+		FROM workspace_features
+		WHERE %s
+		ORDER BY %s%s`, strings.Join(where, " AND "), orderBy, limitClause)
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WorkspaceFeature
+	for rows.Next() {
+		var f WorkspaceFeature
+		if err := scanFeature(rows, &f); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // GetWorkspaceFeature returns a single feature.
 // Returns ErrNotFound if no row exists.
 func (r *Reader) GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (WorkspaceFeature, error) {
@@ -200,7 +274,7 @@ func (r *Reader) GetWorkspaceFeature(ctx context.Context, workspaceID, featureID
 		SELECT id, workspace_id, feature_id, title, feature_status, current_stage, next_action,
 		       stages, source_path, source_hash, created_at, updated_at
 		FROM workspace_features
-		WHERE workspace_id = $1 AND feature_id = $2`
+		WHERE workspace_id = $1 AND id::text = $2`
 	row := r.db.QueryRow(ctx, q, uid, featureID)
 	var f WorkspaceFeature
 	if err := row.Scan(
@@ -222,9 +296,9 @@ func (r *Reader) ListFeatureDocuments(ctx context.Context, workspaceID, featureI
 		return nil, err
 	}
 	const q = `
-		SELECT id, workspace_id, feature_id, document_type, source_path, url, created_at, updated_at
+		SELECT id, workspace_id, feature_id, feature_name, document_type, source_path, url, created_at, updated_at
 		FROM workspace_feature_documents
-		WHERE workspace_id = $1 AND feature_id = $2
+		WHERE workspace_id = $1 AND feature_id::text = $2
 		ORDER BY document_type`
 	rows, err := r.db.Query(ctx, q, uid, featureID)
 	if err != nil {
@@ -234,7 +308,7 @@ func (r *Reader) ListFeatureDocuments(ctx context.Context, workspaceID, featureI
 	var out []WorkspaceFeatureDocument
 	for rows.Next() {
 		var d WorkspaceFeatureDocument
-		if err := rows.Scan(&d.ID, &d.WorkspaceID, &d.FeatureID, &d.DocumentType, &d.SourcePath, &d.URL, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.WorkspaceID, &d.FeatureID, &d.FeatureName, &d.DocumentType, &d.SourcePath, &d.URL, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -249,12 +323,12 @@ func (r *Reader) ListFeatureTasks(ctx context.Context, workspaceID, featureID st
 		return nil, err
 	}
 	const q = `
-		SELECT id, workspace_id, feature_id, task_id, title, repo, status, depends_on,
-		       blocked_reason, branch, execution, pr, workspace_pr, source_path, source_hash,
-		       created_at, updated_at
-		FROM workspace_tasks
-		WHERE workspace_id = $1 AND feature_id = $2
-		ORDER BY task_id`
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
+		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
+		FROM workspace_tasks t
+		WHERE t.workspace_id = $1 AND t.feature_id::text = $2
+		ORDER BY t.task_id`
 	rows, err := r.db.Query(ctx, q, uid, featureID)
 	if err != nil {
 		return nil, err
@@ -278,12 +352,12 @@ func (r *Reader) ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]
 		return nil, err
 	}
 	const q = `
-		SELECT id, workspace_id, feature_id, task_id, title, repo, status, depends_on,
-		       blocked_reason, branch, execution, pr, workspace_pr, source_path, source_hash,
-		       created_at, updated_at
-		FROM workspace_tasks
-		WHERE workspace_id = $1
-		ORDER BY feature_id, task_id`
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
+		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
+		FROM workspace_tasks t
+		WHERE t.workspace_id = $1
+		ORDER BY t.feature_name, t.task_id`
 	rows, err := r.db.Query(ctx, q, uid)
 	if err != nil {
 		return nil, err
@@ -300,7 +374,7 @@ func (r *Reader) ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]
 	return out, rows.Err()
 }
 
-// GetWorkspaceTask returns a single task by (workspace_id, feature_id, task_id).
+// GetWorkspaceTask returns a single task by workspace UUID, feature_id, and task row UUID.
 // Returns ErrNotFound if no row exists.
 func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (WorkspaceTask, error) {
 	uid, err := parseUUID(workspaceID)
@@ -308,15 +382,15 @@ func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, t
 		return WorkspaceTask{}, err
 	}
 	const q = `
-		SELECT id, workspace_id, feature_id, task_id, title, repo, status, depends_on,
-		       blocked_reason, branch, execution, pr, workspace_pr, source_path, source_hash,
-		       created_at, updated_at
-		FROM workspace_tasks
-		WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3`
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
+		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
+		FROM workspace_tasks t
+		WHERE t.workspace_id = $1 AND t.feature_id::text = $2 AND t.id::text = $3`
 	row := r.db.QueryRow(ctx, q, uid, featureID, taskID)
 	var t WorkspaceTask
 	if err := row.Scan(
-		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.TaskID, &t.Title, &t.Repo, &t.Status,
+		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.FeatureName, &t.TaskID, &t.Title, &t.Repo, &t.Status,
 		&t.DependsOn, &t.BlockedReason, &t.Branch, &t.Execution, &t.Pr, &t.WorkspacePr,
 		&t.SourcePath, &t.SourceHash, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
@@ -426,7 +500,7 @@ func scanFeature(row rowScanner, f *WorkspaceFeature) error {
 
 func scanTask(row rowScanner, t *WorkspaceTask) error {
 	return row.Scan(
-		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.TaskID, &t.Title, &t.Repo, &t.Status,
+		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.FeatureName, &t.TaskID, &t.Title, &t.Repo, &t.Status,
 		&t.DependsOn, &t.BlockedReason, &t.Branch, &t.Execution, &t.Pr, &t.WorkspacePr,
 		&t.SourcePath, &t.SourceHash, &t.CreatedAt, &t.UpdatedAt,
 	)
