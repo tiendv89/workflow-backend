@@ -203,7 +203,8 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 		counts := taskCountsByFeature[database.UUIDString(f.ID)]
 		featureSummaries = append(featureSummaries, domain.FeatureSummary{
 			ID:           database.UUIDString(f.ID),
-			FeatureID:    f.FeatureID,
+			FeatureID:    database.UUIDString(f.FeatureID),
+			FeatureName:  f.FeatureName,
 			Title:        f.Title,
 			Status:       derefStr(f.FeatureStatus),
 			CurrentStage: derefStr(f.CurrentStage),
@@ -333,7 +334,8 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 	return &domain.FeatureDetail{
 		FeatureSummary: domain.FeatureSummary{
 			ID:           database.UUIDString(feat.ID),
-			FeatureID:    feat.FeatureID,
+			FeatureID:    database.UUIDString(feat.FeatureID),
+			FeatureName:  feat.FeatureName,
 			Title:        feat.Title,
 			Status:       derefStr(feat.FeatureStatus),
 			CurrentStage: derefStr(feat.CurrentStage),
@@ -474,7 +476,8 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 		counts := taskCountsByFeature[database.UUIDString(f.ID)]
 		out = append(out, domain.FeatureSummary{
 			ID:           database.UUIDString(f.ID),
-			FeatureID:    f.FeatureID,
+			FeatureID:    database.UUIDString(f.FeatureID),
+			FeatureName:  f.FeatureName,
 			Title:        f.Title,
 			Status:       derefStr(f.FeatureStatus),
 			CurrentStage: derefStr(f.CurrentStage),
@@ -561,6 +564,7 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 	return &domain.TaskDetail{
 		ID:            summary.ID,
 		TaskID:        summary.TaskID,
+		TaskName:      summary.TaskName,
 		FeatureID:     summary.FeatureID,
 		FeatureName:   summary.FeatureName,
 		Title:         summary.Title,
@@ -644,7 +648,8 @@ func toTaskSummary(t database.WorkspaceTask) domain.TaskSummary {
 	isBlocked := t.Status != nil && *t.Status == "blocked"
 	return domain.TaskSummary{
 		ID:            database.UUIDString(t.ID),
-		TaskID:        t.TaskID,
+		TaskID:        database.UUIDString(t.TaskID),
+		TaskName:      t.TaskName,
 		FeatureID:     database.UUIDString(t.FeatureID),
 		FeatureName:   t.FeatureName,
 		Title:         t.Title,
@@ -664,8 +669,8 @@ func toActivityEvent(a database.WorkspaceActivityEvent) domain.ActivityEvent {
 		Scope:     a.ScopeType,
 		Actor:     derefStr(a.Actor),
 		Note:      derefStr(a.Note),
-		FeatureID: derefStr(a.FeatureID),
-		TaskID:    derefStr(a.TaskID),
+		FeatureID: database.UUIDString(a.FeatureID),
+		TaskID:    database.UUIDString(a.TaskID),
 	}
 	if a.OccurredAt != nil {
 		if t, err := time.Parse(time.RFC3339, *a.OccurredAt); err == nil {

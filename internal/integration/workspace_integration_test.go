@@ -264,14 +264,14 @@ func TestGetWorkspace_Detail_IncludesFeatureAndTaskSummaries(t *testing.T) {
 	if detail.ID != wsID {
 		t.Errorf("expected ID %s, got %s", wsID, detail.ID)
 	}
-	if len(detail.Features) != 1 || detail.Features[0].FeatureID != featureID {
-		t.Errorf("expected feature %s, got %v", featureID, detail.Features)
+	if len(detail.Features) != 1 || detail.Features[0].FeatureID != featureRowID || detail.Features[0].FeatureName != featureID {
+		t.Errorf("expected feature id %s/name %s, got %v", featureRowID, featureID, detail.Features)
 	}
 	if len(detail.Features[0].Stages) == 0 {
 		t.Error("expected feature stages to be included")
 	}
-	if len(detail.Tasks) != 1 || detail.Tasks[0].TaskID != taskID {
-		t.Errorf("expected task %s, got %v", taskID, detail.Tasks)
+	if len(detail.Tasks) != 1 || detail.Tasks[0].TaskID != taskRowID || detail.Tasks[0].TaskName != taskID {
+		t.Errorf("expected task id %s/name %s, got %v", taskRowID, taskID, detail.Tasks)
 	}
 }
 
@@ -325,8 +325,11 @@ func TestGetFeature_Detail_IncludesDocumentsTasksActivity(t *testing.T) {
 	}
 	var detail domain.FeatureDetail
 	json.NewDecoder(resp.Body).Decode(&detail)
-	if detail.FeatureID != featureID {
-		t.Errorf("expected feature_id %s, got %s", featureID, detail.FeatureID)
+	if detail.FeatureID != featureRowID {
+		t.Errorf("expected feature_id %s, got %s", featureRowID, detail.FeatureID)
+	}
+	if detail.FeatureName != featureID {
+		t.Errorf("expected feature_name %s, got %s", featureID, detail.FeatureName)
 	}
 	if detail.WorkspaceID != wsID {
 		t.Errorf("expected workspace_id %s, got %s", wsID, detail.WorkspaceID)
@@ -449,8 +452,8 @@ func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task after limit, got %d", len(tasks))
 	}
-	if tasks[0].TaskID != "T2" {
-		t.Errorf("expected T2 first for title_desc, got %s", tasks[0].TaskID)
+	if tasks[0].TaskName != "T2" {
+		t.Errorf("expected T2 first for title_desc, got %s", tasks[0].TaskName)
 	}
 }
 
@@ -481,7 +484,7 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
 		t.Fatalf("decode tasks: %v", err)
 	}
-	got := []string{tasks[0].TaskID, tasks[1].TaskID, tasks[2].TaskID}
+	got := []string{tasks[0].TaskName, tasks[1].TaskName, tasks[2].TaskName}
 	want := []string{"T1", "T2", "T10"}
 	for i := range want {
 		if got[i] != want[i] {
@@ -546,8 +549,11 @@ func TestGetTask_Detail_UsesUUIDFeatureAndTaskIDs(t *testing.T) {
 	}
 	var detail domain.TaskDetail
 	json.NewDecoder(resp.Body).Decode(&detail)
-	if detail.TaskID != taskID {
-		t.Errorf("expected task_id %s, got %s", taskID, detail.TaskID)
+	if detail.TaskID != taskRowID {
+		t.Errorf("expected task_id %s, got %s", taskRowID, detail.TaskID)
+	}
+	if detail.TaskName != taskID {
+		t.Errorf("expected task_name %s, got %s", taskID, detail.TaskName)
 	}
 	if detail.WorkspaceID != wsID {
 		t.Errorf("expected workspace_id %s, got %s", wsID, detail.WorkspaceID)

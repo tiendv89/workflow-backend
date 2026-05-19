@@ -87,7 +87,10 @@ func NewFeature(workspaceID, featureID, title, status, stage string) database.Wo
 	if err := f.WorkspaceID.Scan(workspaceID); err != nil {
 		panic(err)
 	}
-	f.FeatureID = featureID
+	if err := f.FeatureID.Scan("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"); err != nil {
+		panic(err)
+	}
+	f.FeatureName = featureID
 	f.Title = title
 	f.FeatureStatus = &status
 	f.CurrentStage = &stage
@@ -141,7 +144,10 @@ func NewTask(workspaceID, featureID, taskID, title, status string, dependsOn []s
 		panic(err)
 	}
 	t.FeatureName = featureID
-	t.TaskID = taskID
+	if err := t.TaskID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd"); err != nil {
+		panic(err)
+	}
+	t.TaskName = taskID
 	t.Title = title
 	t.Status = &status
 
@@ -183,9 +189,13 @@ func NewActivityEvent(workspaceID, featureID, taskID, action, actor, note string
 		scopeType = "feature"
 	}
 	e.ScopeType = scopeType
-	e.FeatureID = &featureID
+	if err := e.FeatureID.Scan("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"); err != nil {
+		panic(err)
+	}
 	if taskID != "" {
-		e.TaskID = &taskID
+		if err := e.TaskID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd"); err != nil {
+			panic(err)
+		}
 	}
 	e.Action = &action
 	e.Actor = &actor
@@ -328,7 +338,7 @@ func (f *FakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.Wo
 func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
 	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
 	for _, task := range f.Tasks {
-		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskID), strings.ToLower(filters.TaskID)) {
+		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
 			continue
 		}
 		if filters.Title != "" && !strings.Contains(strings.ToLower(task.Title), strings.ToLower(filters.Title)) {
@@ -347,7 +357,7 @@ func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters data
 		a, b := out[i], out[j]
 		switch filters.Sort {
 		case "task_id_desc":
-			return taskIDGreater(a.TaskID, b.TaskID)
+			return taskIDGreater(a.TaskName, b.TaskName)
 		case "title_asc":
 			return a.Title < b.Title
 		case "title_desc":
@@ -367,7 +377,7 @@ func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters data
 		case "task_id_asc", "":
 			fallthrough
 		default:
-			return taskIDLess(a.TaskID, b.TaskID)
+			return taskIDLess(a.TaskName, b.TaskName)
 		}
 	})
 

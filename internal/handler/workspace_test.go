@@ -302,11 +302,12 @@ func TestGetFeature_200(t *testing.T) {
 	ws := makeTestWorkspace(handlerTestWSID)
 	status := "in_design"
 	feat := database.WorkspaceFeature{
-		FeatureID:     "feature-1",
+		FeatureName:   "feature-1",
 		Title:         "My Feature",
 		FeatureStatus: &status,
 	}
 	feat.ID.Scan(handlerTestFeatureRowID)
+	feat.FeatureID.Scan(handlerTestFeatureRowID)
 	feat.WorkspaceID.Scan(handlerTestWSID)
 	feat.UpdatedAt.Scan(time.Now())
 
@@ -343,19 +344,21 @@ func TestListFeatureTasks_200(t *testing.T) {
 	ws := makeTestWorkspace(handlerTestWSID)
 	status := "ready"
 	feat := database.WorkspaceFeature{
-		FeatureID: "feature-1",
-		Title:     "Feature One",
+		FeatureName: "feature-1",
+		Title:       "Feature One",
 	}
 	feat.ID.Scan(handlerTestFeatureRowID)
+	feat.FeatureID.Scan(handlerTestFeatureRowID)
 	feat.WorkspaceID.Scan(handlerTestWSID)
 	feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
-		TaskID:      "T1",
+		TaskName:    "T1",
 		Title:       "Task One",
 		Status:      &status,
 	}
 	task.ID.Scan(handlerTestTaskRowID)
+	task.TaskID.Scan(handlerTestTaskRowID)
 	task.FeatureID.Scan(handlerTestFeatureRowID)
 	task.WorkspaceID.Scan(handlerTestWSID)
 	task.UpdatedAt.Scan(time.Now())
@@ -388,21 +391,23 @@ func TestGetTask_200(t *testing.T) {
 	ws := makeTestWorkspace(handlerTestWSID)
 	status := "in_progress"
 	feat := database.WorkspaceFeature{
-		FeatureID: "feature-1",
-		Title:     "Feature One",
+		FeatureName: "feature-1",
+		Title:       "Feature One",
 	}
 	feat.ID.Scan(handlerTestFeatureRowID)
+	feat.FeatureID.Scan(handlerTestFeatureRowID)
 	feat.WorkspaceID.Scan(handlerTestWSID)
 	feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
-		TaskID:      "T1",
+		TaskName:    "T1",
 		Title:       "Task One",
 		Status:      &status,
 		DependsOn:   []byte(`[]`),
 		Execution:   []byte(`{"actor_type":"agent"}`),
 	}
 	task.ID.Scan(handlerTestTaskRowID)
+	task.TaskID.Scan(handlerTestTaskRowID)
 	task.FeatureID.Scan(handlerTestFeatureRowID)
 	task.WorkspaceID.Scan(handlerTestWSID)
 	task.UpdatedAt.Scan(time.Now())

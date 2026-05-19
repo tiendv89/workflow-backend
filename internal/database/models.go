@@ -30,7 +30,8 @@ type WorkspaceRepo struct {
 type WorkspaceFeature struct {
 	ID            pgtype.UUID
 	WorkspaceID   pgtype.UUID
-	FeatureID     string
+	FeatureID     pgtype.UUID
+	FeatureName   string
 	Title         string
 	FeatureStatus *string
 	CurrentStage  *string
@@ -59,7 +60,8 @@ type WorkspaceTask struct {
 	WorkspaceID   pgtype.UUID
 	FeatureID     pgtype.UUID
 	FeatureName   string
-	TaskID        string
+	TaskID        pgtype.UUID
+	TaskName      string
 	Title         string
 	Repo          *string
 	Status        *string
@@ -79,8 +81,8 @@ type WorkspaceActivityEvent struct {
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID
 	ScopeType   string
-	FeatureID   *string
-	TaskID      *string
+	FeatureID   pgtype.UUID
+	TaskID      pgtype.UUID
 	Action      *string
 	Actor       *string
 	OccurredAt  *string

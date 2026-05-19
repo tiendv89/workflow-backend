@@ -122,9 +122,9 @@ func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters data
 	sort.SliceStable(out, func(i, j int) bool {
 		switch filters.Sort {
 		case "task_id_desc":
-			return taskIDGreater(out[i].TaskID, out[j].TaskID)
+			return taskIDGreater(out[i].TaskName, out[j].TaskName)
 		case "task_id_asc", "":
-			return taskIDLess(out[i].TaskID, out[j].TaskID)
+			return taskIDLess(out[i].TaskName, out[j].TaskName)
 		default:
 			return false
 		}
@@ -314,11 +314,12 @@ func TestGetWorkspace_Success(t *testing.T) {
 	ws := makeUUID(testWSID)
 	status := "in_design"
 	feat := database.WorkspaceFeature{
-		FeatureID:     "feature-1",
+		FeatureName:   "feature-1",
 		Title:         "Feature One",
 		FeatureStatus: &status,
 	}
 	feat.ID.Scan(testFeatureRowID)
+	feat.FeatureID.Scan(testFeatureRowID)
 	feat.WorkspaceID.Scan(testWSID)
 	feat.UpdatedAt.Scan(time.Now())
 
@@ -338,8 +339,11 @@ func TestGetWorkspace_Success(t *testing.T) {
 	if len(detail.Features) != 1 {
 		t.Errorf("expected 1 feature, got %d", len(detail.Features))
 	}
-	if detail.Features[0].FeatureID != "feature-1" {
-		t.Errorf("expected feature-1, got %s", detail.Features[0].FeatureID)
+	if detail.Features[0].FeatureID != testFeatureRowID {
+		t.Errorf("expected feature id %s, got %s", testFeatureRowID, detail.Features[0].FeatureID)
+	}
+	if detail.Features[0].FeatureName != "feature-1" {
+		t.Errorf("expected feature name feature-1, got %s", detail.Features[0].FeatureName)
 	}
 }
 
@@ -436,19 +440,23 @@ func TestGetTask_NotFound(t *testing.T) {
 func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	ws := makeUUID(testWSID)
 	feat := database.WorkspaceFeature{
-		FeatureID: "feature-1",
-		Title:     "Feature One",
+		FeatureName: "feature-1",
+		Title:       "Feature One",
 	}
 	feat.ID.Scan(testFeatureRowID)
+	feat.FeatureID.Scan(testFeatureRowID)
 	feat.WorkspaceID.Scan(testWSID)
 	feat.UpdatedAt.Scan(time.Now())
 	status := "ready"
-	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskID: "T1", Title: "Task One", Status: &status}
-	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskID: "T2", Title: "Task Two", Status: &status}
-	task10 := database.WorkspaceTask{FeatureName: "feature-1", TaskID: "T10", Title: "Task Ten", Status: &status}
+	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T1", Title: "Task One", Status: &status}
+	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T2", Title: "Task Two", Status: &status}
+	task10 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T10", Title: "Task Ten", Status: &status}
 	task1.ID.Scan(testTaskRowID)
 	task2.ID.Scan("55555555-5555-5555-5555-555555555555")
 	task10.ID.Scan("66666666-6666-6666-6666-666666666666")
+	task1.TaskID.Scan(testTaskRowID)
+	task2.TaskID.Scan("55555555-5555-5555-5555-555555555555")
+	task10.TaskID.Scan("66666666-6666-6666-6666-666666666666")
 	task1.FeatureID.Scan(testFeatureRowID)
 	task2.FeatureID.Scan(testFeatureRowID)
 	task10.FeatureID.Scan(testFeatureRowID)
@@ -467,7 +475,7 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	if se != (domain.SourceError{}) {
 		t.Fatalf("unexpected error: %v", se)
 	}
-	got := []string{tasks[0].TaskID, tasks[1].TaskID, tasks[2].TaskID}
+	got := []string{tasks[0].TaskName, tasks[1].TaskName, tasks[2].TaskName}
 	want := []string{"T1", "T2", "T10"}
 	for i := range want {
 		if got[i] != want[i] {
@@ -483,21 +491,23 @@ func TestGetTask_Success(t *testing.T) {
 	_ = blocked
 	taskStatus := &status
 	feat := database.WorkspaceFeature{
-		FeatureID: "feature-1",
-		Title:     "Feature One",
+		FeatureName: "feature-1",
+		Title:       "Feature One",
 	}
 	feat.ID.Scan(testFeatureRowID)
+	feat.FeatureID.Scan(testFeatureRowID)
 	feat.WorkspaceID.Scan(testWSID)
 	feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
-		TaskID:      "T1",
+		TaskName:    "T1",
 		Title:       "My Task",
 		Status:      taskStatus,
 		DependsOn:   []byte(`["T0"]`),
 		Execution:   []byte(`{"actor_type":"agent"}`),
 	}
 	task.ID.Scan(testTaskRowID)
+	task.TaskID.Scan(testTaskRowID)
 	task.FeatureID.Scan(testFeatureRowID)
 	task.WorkspaceID.Scan(testWSID)
 	task.UpdatedAt.Scan(time.Now())
@@ -513,8 +523,11 @@ func TestGetTask_Success(t *testing.T) {
 	if se != (domain.SourceError{}) {
 		t.Fatalf("unexpected error: %v", se)
 	}
-	if detail.TaskID != "T1" {
-		t.Errorf("expected task T1, got %s", detail.TaskID)
+	if detail.TaskName != "T1" {
+		t.Errorf("expected task name T1, got %s", detail.TaskName)
+	}
+	if detail.TaskID != testTaskRowID {
+		t.Errorf("expected task id %s, got %s", testTaskRowID, detail.TaskID)
 	}
 	if detail.Execution.ActorType != "agent" {
 		t.Errorf("expected actor_type 'agent', got %q", detail.Execution.ActorType)

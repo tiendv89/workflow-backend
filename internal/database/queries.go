@@ -187,7 +187,7 @@ func (r *Reader) ListWorkspaceFeatures(ctx context.Context, workspaceID string) 
 		return nil, err
 	}
 	const q = `
-		SELECT id, workspace_id, feature_id, title, feature_status, current_stage, next_action,
+		SELECT id, workspace_id, feature_id, feature_name, title, feature_status, current_stage, next_action,
 		       stages, source_path, source_hash, created_at, updated_at
 		FROM workspace_features
 		WHERE workspace_id = $1
@@ -229,20 +229,20 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 		argPos++
 	}
 
-	orderBy := "updated_at DESC, feature_id ASC"
+	orderBy := "updated_at DESC, feature_name ASC"
 	switch filters.Sort {
 	case "title_asc":
-		orderBy = "title ASC, feature_id ASC"
+		orderBy = "title ASC, feature_name ASC"
 	case "title_desc":
-		orderBy = "title DESC, feature_id ASC"
+		orderBy = "title DESC, feature_name ASC"
 	case "status_asc":
-		orderBy = "feature_status ASC NULLS LAST, feature_id ASC"
+		orderBy = "feature_status ASC NULLS LAST, feature_name ASC"
 	case "status_desc":
-		orderBy = "feature_status DESC NULLS LAST, feature_id ASC"
+		orderBy = "feature_status DESC NULLS LAST, feature_name ASC"
 	case "updated_at_asc", "time_asc":
-		orderBy = "updated_at ASC, feature_id ASC"
+		orderBy = "updated_at ASC, feature_name ASC"
 	case "updated_at_desc", "time_desc", "":
-		orderBy = "updated_at DESC, feature_id ASC"
+		orderBy = "updated_at DESC, feature_name ASC"
 	}
 
 	limitClause := ""
@@ -252,7 +252,7 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 	}
 
 	q := fmt.Sprintf(`
-		SELECT id, workspace_id, feature_id, title, feature_status, current_stage, next_action,
+		SELECT id, workspace_id, feature_id, feature_name, title, feature_status, current_stage, next_action,
 		       stages, source_path, source_hash, created_at, updated_at
 		FROM workspace_features
 		WHERE %s
@@ -280,19 +280,19 @@ func (r *Reader) GetWorkspaceFeature(ctx context.Context, workspaceID, featureID
 	if err != nil {
 		return WorkspaceFeature{}, err
 	}
-	fid, err := parseUUID(featureID)
+	fid, err := r.resolveFeatureID(ctx, uid, featureID)
 	if err != nil {
 		return WorkspaceFeature{}, err
 	}
 	const q = `
-		SELECT id, workspace_id, feature_id, title, feature_status, current_stage, next_action,
+		SELECT id, workspace_id, feature_id, feature_name, title, feature_status, current_stage, next_action,
 		       stages, source_path, source_hash, created_at, updated_at
 		FROM workspace_features
-		WHERE workspace_id = $1 AND id = $2`
+		WHERE workspace_id = $1 AND feature_id = $2`
 	row := r.db.QueryRow(ctx, q, uid, fid)
 	var f WorkspaceFeature
 	if err := row.Scan(
-		&f.ID, &f.WorkspaceID, &f.FeatureID, &f.Title, &f.FeatureStatus, &f.CurrentStage,
+		&f.ID, &f.WorkspaceID, &f.FeatureID, &f.FeatureName, &f.Title, &f.FeatureStatus, &f.CurrentStage,
 		&f.NextAction, &f.Stages, &f.SourcePath, &f.SourceHash, &f.CreatedAt, &f.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -309,12 +309,16 @@ func (r *Reader) ListFeatureDocuments(ctx context.Context, workspaceID, featureI
 	if err != nil {
 		return nil, err
 	}
+	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	if err != nil {
+		return nil, err
+	}
 	const q = `
 		SELECT id, workspace_id, feature_id, feature_name, document_type, source_path, url, created_at, updated_at
 		FROM workspace_feature_documents
-		WHERE workspace_id = $1 AND feature_id::text = $2
+		WHERE workspace_id = $1 AND feature_id = $2
 		ORDER BY document_type`
-	rows, err := r.db.Query(ctx, q, uid, featureID)
+	rows, err := r.db.Query(ctx, q, uid, fid)
 	if err != nil {
 		return nil, err
 	}
@@ -337,11 +341,16 @@ func (r *Reader) SearchFeatureTasks(ctx context.Context, workspaceID, featureID 
 		return nil, err
 	}
 
-	where := []string{"t.workspace_id = $1", "t.feature_id::text = $2"}
-	args := []interface{}{uid, featureID}
+	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	if err != nil {
+		return nil, err
+	}
+
+	where := []string{"t.workspace_id = $1", "t.feature_id = $2"}
+	args := []interface{}{uid, fid}
 	argPos := 3
 	if filters.TaskID != "" {
-		where = append(where, fmt.Sprintf("t.task_id ILIKE $%d", argPos))
+		where = append(where, fmt.Sprintf("t.task_name ILIKE $%d", argPos))
 		args = append(args, "%"+filters.TaskID+"%")
 		argPos++
 	}
@@ -392,7 +401,7 @@ func (r *Reader) SearchFeatureTasks(ctx context.Context, workspaceID, featureID 
 	}
 
 	q := fmt.Sprintf(`
-		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
 		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
@@ -420,14 +429,18 @@ func (r *Reader) ListFeatureTasks(ctx context.Context, workspaceID, featureID st
 	if err != nil {
 		return nil, err
 	}
+	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	if err != nil {
+		return nil, err
+	}
 	q := fmt.Sprintf(`
-		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
 		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
-		WHERE t.workspace_id = $1 AND t.feature_id::text = $2
+		WHERE t.workspace_id = $1 AND t.feature_id = $2
 		ORDER BY %s`, taskIDOrderAsc("t"))
-	rows, err := r.db.Query(ctx, q, uid, featureID)
+	rows, err := r.db.Query(ctx, q, uid, fid)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +463,7 @@ func (r *Reader) ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]
 		return nil, err
 	}
 	q := fmt.Sprintf(`
-		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
 		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
@@ -479,24 +492,24 @@ func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, t
 	if err != nil {
 		return WorkspaceTask{}, err
 	}
-	fid, err := parseUUID(featureID)
+	fid, err := r.resolveFeatureID(ctx, uid, featureID)
 	if err != nil {
 		return WorkspaceTask{}, err
 	}
-	tid, err := parseUUID(taskID)
+	tid, err := r.resolveTaskID(ctx, uid, fid, taskID)
 	if err != nil {
 		return WorkspaceTask{}, err
 	}
 	const q = `
-		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.title,
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
 		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
-		WHERE t.workspace_id = $1 AND t.feature_id = $2 AND t.id = $3`
+		WHERE t.workspace_id = $1 AND t.feature_id = $2 AND t.task_id = $3`
 	row := r.db.QueryRow(ctx, q, uid, fid, tid)
 	var t WorkspaceTask
 	if err := row.Scan(
-		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.FeatureName, &t.TaskID, &t.Title, &t.Repo, &t.Status,
+		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.FeatureName, &t.TaskID, &t.TaskName, &t.Title, &t.Repo, &t.Status,
 		&t.DependsOn, &t.BlockedReason, &t.Branch, &t.Execution, &t.Pr, &t.WorkspacePr,
 		&t.SourcePath, &t.SourceHash, &t.CreatedAt, &t.UpdatedAt,
 	); err != nil {
@@ -514,14 +527,37 @@ func (r *Reader) ListActivityEvents(ctx context.Context, workspaceID, featureID,
 	if err != nil {
 		return nil, err
 	}
-	filterClause, filterArgs, _ := activityFilterClause(featureID, taskID, 2)
+	var where []string
+	args := []interface{}{uid}
+	argPos := 2
+	if featureID != "" {
+		fid, err := r.resolveFeatureID(ctx, uid, featureID)
+		if err != nil {
+			return nil, err
+		}
+		where = append(where, fmt.Sprintf("feature_id = $%d", argPos))
+		args = append(args, fid)
+		argPos++
+		if taskID != "" {
+			tid, err := r.resolveTaskID(ctx, uid, fid, taskID)
+			if err != nil {
+				return nil, err
+			}
+			where = append(where, fmt.Sprintf("task_id = $%d", argPos))
+			args = append(args, tid)
+			argPos++
+		}
+	}
+	filterClause := ""
+	if len(where) > 0 {
+		filterClause = " AND " + strings.Join(where, " AND ")
+	}
 	q := fmt.Sprintf(`
 		SELECT id, workspace_id, scope_type, feature_id, task_id, action, actor,
 		       occurred_at, note, sequence, raw_event, created_at
 		FROM workspace_activity_events
 		WHERE workspace_id = $1%s
 		ORDER BY occurred_at DESC, sequence DESC`, filterClause)
-	args := append([]interface{}{uid}, filterArgs...)
 
 	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
@@ -563,37 +599,93 @@ func parseUUID(s string) (pgtype.UUID, error) {
 	return uid, nil
 }
 
+func (r *Reader) resolveFeatureID(ctx context.Context, workspaceID pgtype.UUID, featureIdentifier string) (pgtype.UUID, error) {
+	if fid, err := parseUUID(featureIdentifier); err == nil {
+		const q = `SELECT id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2`
+		var id pgtype.UUID
+		err := r.db.QueryRow(ctx, q, workspaceID, fid).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, err
+		}
+	}
+
+	const q = `SELECT id FROM workspace_features WHERE workspace_id = $1 AND feature_name = $2`
+	var id pgtype.UUID
+	if err := r.db.QueryRow(ctx, q, workspaceID, strings.TrimSpace(featureIdentifier)).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, ErrNotFound
+		}
+		return pgtype.UUID{}, err
+	}
+	return id, nil
+}
+
+func (r *Reader) resolveTaskID(ctx context.Context, workspaceID, featureID pgtype.UUID, taskIdentifier string) (pgtype.UUID, error) {
+	if tid, err := parseUUID(taskIdentifier); err == nil {
+		const q = `SELECT id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3`
+		var id pgtype.UUID
+		err := r.db.QueryRow(ctx, q, workspaceID, featureID, tid).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, err
+		}
+	}
+
+	const q = `SELECT id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_name = $3`
+	var id pgtype.UUID
+	if err := r.db.QueryRow(ctx, q, workspaceID, featureID, strings.TrimSpace(taskIdentifier)).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, ErrNotFound
+		}
+		return pgtype.UUID{}, err
+	}
+	return id, nil
+}
+
 func taskIDOrderAsc(alias string) string {
-	return fmt.Sprintf("%s ASC NULLS LAST, %s.task_id ASC", taskIDNumberExpr(alias), alias)
+	return fmt.Sprintf("%s ASC NULLS LAST, %s.task_name ASC", taskIDNumberExpr(alias), alias)
 }
 
 func taskIDOrderDesc(alias string) string {
-	return fmt.Sprintf("%s DESC NULLS LAST, %s.task_id DESC", taskIDNumberExpr(alias), alias)
+	return fmt.Sprintf("%s DESC NULLS LAST, %s.task_name DESC", taskIDNumberExpr(alias), alias)
 }
 
 func taskIDNumberExpr(alias string) string {
-	col := alias + ".task_id"
+	col := alias + ".task_name"
 	return fmt.Sprintf("NULLIF(regexp_replace(%s, '^T([0-9]+)$', '\\1'), %s)::int", col, col)
 }
 
-func activityFilterClause(featureID, taskID string, firstArg int) (string, []interface{}, int) {
+func activityFilterClause(featureID, taskID string, firstArg int) (string, []interface{}, int, error) {
 	var where []string
 	var args []interface{}
 	argPos := firstArg
 	if featureID != "" {
-		where = append(where, fmt.Sprintf("(feature_id::text = $%d OR feature_name = $%d)", argPos, argPos))
-		args = append(args, featureID)
+		fid, err := parseUUID(featureID)
+		if err != nil {
+			return "", nil, argPos, err
+		}
+		where = append(where, fmt.Sprintf("feature_id = $%d", argPos))
+		args = append(args, fid)
 		argPos++
 	}
 	if taskID != "" {
-		where = append(where, fmt.Sprintf("(task_id::text = $%d OR task_name = $%d)", argPos, argPos))
-		args = append(args, taskID)
+		tid, err := parseUUID(taskID)
+		if err != nil {
+			return "", nil, argPos, err
+		}
+		where = append(where, fmt.Sprintf("task_id = $%d", argPos))
+		args = append(args, tid)
 		argPos++
 	}
 	if len(where) == 0 {
-		return "", nil, argPos
+		return "", nil, argPos, nil
 	}
-	return " AND " + strings.Join(where, " AND "), args, argPos
+	return " AND " + strings.Join(where, " AND "), args, argPos, nil
 }
 
 type rowScanner interface {
@@ -610,14 +702,14 @@ func scanSyncRun(row rowScanner, s *WorkspaceSyncRun) error {
 
 func scanFeature(row rowScanner, f *WorkspaceFeature) error {
 	return row.Scan(
-		&f.ID, &f.WorkspaceID, &f.FeatureID, &f.Title, &f.FeatureStatus, &f.CurrentStage,
+		&f.ID, &f.WorkspaceID, &f.FeatureID, &f.FeatureName, &f.Title, &f.FeatureStatus, &f.CurrentStage,
 		&f.NextAction, &f.Stages, &f.SourcePath, &f.SourceHash, &f.CreatedAt, &f.UpdatedAt,
 	)
 }
 
 func scanTask(row rowScanner, t *WorkspaceTask) error {
 	return row.Scan(
-		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.FeatureName, &t.TaskID, &t.Title, &t.Repo, &t.Status,
+		&t.ID, &t.WorkspaceID, &t.FeatureID, &t.FeatureName, &t.TaskID, &t.TaskName, &t.Title, &t.Repo, &t.Status,
 		&t.DependsOn, &t.BlockedReason, &t.Branch, &t.Execution, &t.Pr, &t.WorkspacePr,
 		&t.SourcePath, &t.SourceHash, &t.CreatedAt, &t.UpdatedAt,
 	)
