@@ -67,7 +67,7 @@ This is a **greenfield schema** — no existing data needs to be migrated. The f
 
 `api-service` does not poll GitHub directly. Sync is triggered explicitly:
 
-- **Import**: `POST /api/workspaces/import` — creates a new workspace and triggers a full reconciliation via `adapter-service`.
+- **Import**: `POST /api/workspaces/import` — asks `adapter-service` to accept the workspace import and enqueue reconciliation.
 - **Manual sync**: `POST /api/workspaces/:workspaceId/sync` — triggers a full reconciliation via `adapter-service`.
 - **Webhook-driven sync** (on `adapter-service`): GitHub webhook events on the management repo's branches trigger targeted syncs and task queue entries automatically.
 
@@ -92,7 +92,7 @@ All routes are served by `api-service` under the `/api` prefix.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/workspaces` | List all saved workspaces with source state. |
-| `POST` | `/api/workspaces/import` | Import a new workspace from a GitHub repo URL. Triggers a full reconciliation in `adapter-service`. |
+| `POST` | `/api/workspaces/import` | Import a new workspace from a GitHub repo URL. Returns `202` with `{ "workspace_id": "...", "status": "accepted" }` after `adapter-service` accepts the queued reconciliation. |
 | `GET` | `/api/workspaces/:workspaceId` | Workspace detail: features and tasks. |
 | `GET` | `/api/workspaces/:workspaceId/search/features` | Search workspace features. Optional `?title=`, `?status=`, `?sort=`, and `?limit=` filters. |
 | `POST` | `/api/workspaces/:workspaceId/sync` | Trigger a manual full reconciliation. Returns the workspace detail (potentially stale on failure). |
@@ -101,6 +101,8 @@ All routes are served by `api-service` under the `/api` prefix.
 | `GET` | `/api/workspaces/:workspaceId/features/:featureId/search/tasks` | Search tasks in a feature. Optional `?task_id=`, `?title=`, `?status=`, `?repo=`, `?sort=`, and `?limit=` filters. |
 | `GET` | `/api/workspaces/:workspaceId/features/:featureId/tasks/:taskId` | Task detail: dependencies, execution context, PR refs, activity. |
 | `GET` | `/api/workspaces/:workspaceId/activity` | Activity events for a workspace. Optional `?featureId=` and `?taskId=` filters. |
+
+Route parameters `workspaceId`, `featureId`, and `taskId` are UUIDs. `feature_name` and `task_name` fields are informational metadata for display, search, and workflow ordering; they are not used as table references.
 
 Health check (root router, not under `/api`):
 
@@ -128,7 +130,7 @@ Every error response includes:
 
 ## Backward Compatibility
 
-- **No existing routes are modified.** This feature adds new routes; it does not change or remove existing `workflow-backend` endpoints.
+- **No route paths are removed.** Response contracts and route parameters are the ones listed in the API Routes section above.
 - `digital-factory-ui` continues calling GitHub directly until `workspace-tabs-data-flow` switches it over. Both the existing browser-side GitHub reads and the new backend routes coexist during the transition period.
 - The `/healthz` endpoint is unaffected.
 
@@ -170,4 +172,8 @@ go test -v ./...
 
 # A specific package:
 go test -v ./internal/integration/...
+
+# Optional PostgreSQL reader contract test in a dedicated test database:
+WORKFLOW_BACKEND_TEST_DATABASE_URL="postgresql://user:pass@localhost:5432/workflow_backend_test?sslmode=disable" \
+go test -tags=integration ./internal/database
 ```

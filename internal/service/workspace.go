@@ -105,8 +105,8 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 	return out, nil
 }
 
-// ImportWorkspace calls adapter-service to import a workspace then returns its summary.
-func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.ImportInput) (*domain.WorkspaceSummary, domain.SourceError) {
+// ImportWorkspace calls adapter-service to accept a workspace import request.
+func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.ImportInput) (*domain.ImportResult, domain.SourceError) {
 	workspaceID, err := s.adapter.ImportWorkspace(ctx, adapter.ImportRequest{
 		RepoURL:       input.RepoURL,
 		DefaultBranch: input.DefaultBranch,
@@ -119,11 +119,10 @@ func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.Imp
 		return nil, domain.NewAdapterError(domain.ErrAdapterInternal, err.Error())
 	}
 
-	summary, dbErr := s.GetWorkspaceSummary(ctx, workspaceID)
-	if dbErr != (domain.SourceError{}) {
-		return nil, dbErr
-	}
-	return summary, domain.SourceError{}
+	return &domain.ImportResult{
+		ID:     workspaceID,
+		Status: "accepted",
+	}, domain.SourceError{}
 }
 
 // GetWorkspaceSummary returns only basic workspace information without loading features/tasks.
@@ -286,7 +285,7 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	featureUUID := database.UUIDString(feat.ID)
+	featureUUID := database.UUIDString(feat.FeatureID)
 
 	docs, err := s.db.ListFeatureDocuments(ctx, wsID, featureUUID)
 	if err != nil {
@@ -370,7 +369,7 @@ func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, fe
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	tasks, err := s.db.ListFeatureTasks(ctx, wsID, database.UUIDString(feat.ID))
+	tasks, err := s.db.ListFeatureTasks(ctx, wsID, database.UUIDString(feat.FeatureID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -408,7 +407,7 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, database.UUIDString(feat.ID), database.TaskSearchFilters{
+	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, database.UUIDString(feat.FeatureID), database.TaskSearchFilters{
 		TaskID: query.TaskID,
 		Title:  query.Title,
 		Status: query.Status,
@@ -515,7 +514,7 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	t, err := s.db.GetWorkspaceTask(ctx, wsID, database.UUIDString(feat.ID), taskID)
+	t, err := s.db.GetWorkspaceTask(ctx, wsID, database.UUIDString(feat.FeatureID), taskID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("task", taskID)
@@ -523,7 +522,7 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	activity, err := s.db.ListActivityEvents(ctx, wsID, database.UUIDString(t.FeatureID), database.UUIDString(t.ID))
+	activity, err := s.db.ListActivityEvents(ctx, wsID, database.UUIDString(t.FeatureID), database.UUIDString(t.TaskID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}

@@ -58,14 +58,11 @@ func post(t *testing.T, srv *httptest.Server, path, body string) *http.Response 
 	return resp
 }
 
-// --- T5 scenario 1: first import — mocked adapter → DB → workspace read API ---
+// --- T5 scenario 1: first import — accepted by adapter and queued for sync ---
 
-func TestImport_FirstImport_202WithWorkspaceDetail(t *testing.T) {
-	ws := testhelpers.NewWorkspace(wsID, "My Workspace", "my-workspace")
-	src := testhelpers.NewGitHubSource(wsID, repoURL)
+func TestImport_FirstImport_202WithAcceptedWorkspaceID(t *testing.T) {
 	db := &testhelpers.FakeDB{
-		Workspaces: []database.Workspace{ws},
-		GitHubSrcs: map[string]database.WorkspaceGitHubSource{wsID: src},
+		GitHubSrcs: map[string]database.WorkspaceGitHubSource{},
 	}
 	adp := &testhelpers.FakeAdapter{ImportedWorkspaceID: wsID}
 	srv := newServer(db, adp)
@@ -78,18 +75,15 @@ func TestImport_FirstImport_202WithWorkspaceDetail(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", resp.StatusCode)
 	}
-	var detail domain.WorkspaceDetail
-	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+	var result domain.ImportResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if detail.ID != wsID {
-		t.Errorf("expected workspace ID %s, got %s", wsID, detail.ID)
+	if result.ID != wsID {
+		t.Errorf("expected workspace ID %s, got %s", wsID, result.ID)
 	}
-	if detail.Name != "My Workspace" {
-		t.Errorf("expected name 'My Workspace', got %q", detail.Name)
-	}
-	if detail.RepoURL != repoURL {
-		t.Errorf("expected repo_url %s, got %s", repoURL, detail.RepoURL)
+	if result.Status != "accepted" {
+		t.Errorf("expected status accepted, got %q", result.Status)
 	}
 }
 

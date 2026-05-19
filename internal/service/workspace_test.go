@@ -93,7 +93,7 @@ func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database
 
 func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.features {
-		if database.UUIDString(feat.ID) == featureID {
+		if database.UUIDString(feat.FeatureID) == featureID {
 			return feat, nil
 		}
 	}
@@ -104,13 +104,22 @@ func (f *fakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]databas
 	return f.documents, nil
 }
 
-func (f *fakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.WorkspaceTask, error) {
-	return f.tasks, nil
-}
-
-func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+func (f *fakeDB) ListFeatureTasks(_ context.Context, _, featureID string) ([]database.WorkspaceTask, error) {
 	out := make([]database.WorkspaceTask, 0, len(f.tasks))
 	for _, task := range f.tasks {
+		if database.UUIDString(task.FeatureID) == featureID {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		if database.UUIDString(task.FeatureID) != featureID {
+			continue
+		}
 		if filters.Title != "" && task.Title != filters.Title {
 			continue
 		}
@@ -141,7 +150,7 @@ func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.Wor
 
 func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
 	for _, t := range f.tasks {
-		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.ID) == taskID {
+		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
@@ -318,7 +327,7 @@ func TestGetWorkspace_Success(t *testing.T) {
 		Title:         "Feature One",
 		FeatureStatus: &status,
 	}
-	feat.ID.Scan(testFeatureRowID)
+	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
 	feat.FeatureID.Scan(testFeatureRowID)
 	feat.WorkspaceID.Scan(testWSID)
 	feat.UpdatedAt.Scan(time.Now())
@@ -415,6 +424,19 @@ func TestImportWorkspace_Success(t *testing.T) {
 	}
 }
 
+func TestImportWorkspace_AcceptsQueuedImportWithoutCachedWorkspace(t *testing.T) {
+	db := &fakeDB{}
+	svc := newService(db, &fakeAdapter{importID: testWSID})
+
+	result, se := svc.ImportWorkspace(context.Background(), domain.ImportInput{RepoURL: "https://github.com/org/repo"})
+	if se != (domain.SourceError{}) {
+		t.Fatalf("unexpected error: %v", se)
+	}
+	if result.ID != testWSID {
+		t.Errorf("expected workspace ID %s, got %s", testWSID, result.ID)
+	}
+}
+
 func TestGetFeature_NotFound(t *testing.T) {
 	ws := makeUUID(testWSID)
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
@@ -443,7 +465,7 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan(testFeatureRowID)
+	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
 	feat.FeatureID.Scan(testFeatureRowID)
 	feat.WorkspaceID.Scan(testWSID)
 	feat.UpdatedAt.Scan(time.Now())
@@ -494,7 +516,7 @@ func TestGetTask_Success(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan(testFeatureRowID)
+	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
 	feat.FeatureID.Scan(testFeatureRowID)
 	feat.WorkspaceID.Scan(testWSID)
 	feat.UpdatedAt.Scan(time.Now())
@@ -506,7 +528,7 @@ func TestGetTask_Success(t *testing.T) {
 		DependsOn:   []byte(`["T0"]`),
 		Execution:   []byte(`{"actor_type":"agent"}`),
 	}
-	task.ID.Scan(testTaskRowID)
+	task.ID.Scan("88888888-8888-8888-8888-888888888888")
 	task.TaskID.Scan(testTaskRowID)
 	task.FeatureID.Scan(testFeatureRowID)
 	task.WorkspaceID.Scan(testWSID)

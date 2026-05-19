@@ -67,7 +67,7 @@ func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database
 }
 func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.features {
-		if database.UUIDString(feat.ID) == featureID {
+		if database.UUIDString(feat.FeatureID) == featureID {
 			return feat, nil
 		}
 	}
@@ -76,12 +76,21 @@ func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (da
 func (f *fakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]database.WorkspaceFeatureDocument, error) {
 	return f.documents, nil
 }
-func (f *fakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.WorkspaceTask, error) {
-	return f.tasks, nil
-}
-func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+func (f *fakeDB) ListFeatureTasks(_ context.Context, _, featureID string) ([]database.WorkspaceTask, error) {
 	out := make([]database.WorkspaceTask, 0, len(f.tasks))
 	for _, task := range f.tasks {
+		if database.UUIDString(task.FeatureID) == featureID {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
+func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		if database.UUIDString(task.FeatureID) != featureID {
+			continue
+		}
 		if filters.Title != "" && task.Title != filters.Title {
 			continue
 		}
@@ -101,7 +110,7 @@ func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.Wor
 
 func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
 	for _, t := range f.tasks {
-		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.ID) == taskID {
+		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
@@ -216,8 +225,7 @@ func TestGetWorkspace_404(t *testing.T) {
 }
 
 func TestImportWorkspace_202(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{}
 	r := newTestRouter(db, &fakeAdapter{importID: handlerTestWSID})
 
 	body := `{"repo_url":"https://github.com/org/repo"}`
@@ -228,6 +236,16 @@ func TestImportWorkspace_202(t *testing.T) {
 
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	var result struct {
+		WorkspaceID string `json:"workspace_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.WorkspaceID != handlerTestWSID {
+		t.Errorf("expected workspace_id %s, got %s", handlerTestWSID, result.WorkspaceID)
 	}
 }
 
@@ -306,7 +324,7 @@ func TestGetFeature_200(t *testing.T) {
 		Title:         "My Feature",
 		FeatureStatus: &status,
 	}
-	feat.ID.Scan(handlerTestFeatureRowID)
+	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
 	feat.FeatureID.Scan(handlerTestFeatureRowID)
 	feat.WorkspaceID.Scan(handlerTestWSID)
 	feat.UpdatedAt.Scan(time.Now())
@@ -357,7 +375,7 @@ func TestListFeatureTasks_200(t *testing.T) {
 		Title:       "Task One",
 		Status:      &status,
 	}
-	task.ID.Scan(handlerTestTaskRowID)
+	task.ID.Scan("88888888-8888-8888-8888-888888888888")
 	task.TaskID.Scan(handlerTestTaskRowID)
 	task.FeatureID.Scan(handlerTestFeatureRowID)
 	task.WorkspaceID.Scan(handlerTestWSID)
@@ -394,7 +412,7 @@ func TestGetTask_200(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan(handlerTestFeatureRowID)
+	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
 	feat.FeatureID.Scan(handlerTestFeatureRowID)
 	feat.WorkspaceID.Scan(handlerTestWSID)
 	feat.UpdatedAt.Scan(time.Now())
@@ -406,7 +424,7 @@ func TestGetTask_200(t *testing.T) {
 		DependsOn:   []byte(`[]`),
 		Execution:   []byte(`{"actor_type":"agent"}`),
 	}
-	task.ID.Scan(handlerTestTaskRowID)
+	task.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 	task.TaskID.Scan(handlerTestTaskRowID)
 	task.FeatureID.Scan(handlerTestFeatureRowID)
 	task.WorkspaceID.Scan(handlerTestWSID)

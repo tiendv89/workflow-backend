@@ -1,6 +1,7 @@
 package database
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -50,4 +51,37 @@ func TestTaskIDOrderAscUsesNumericWorkflowOrder(t *testing.T) {
 	if strings.Contains(clause, "regexp_replace(t.task_id") {
 		t.Fatalf("task order must not call regexp_replace on UUID task_id, got %q", clause)
 	}
+}
+
+func TestQueryLayerDoesNotResolveReferencesByNames(t *testing.T) {
+	forbidden := []string{
+		"WHERE workspace_id = $1 AND feature_name = $2",
+		"WHERE workspace_id = $1 AND feature_id = $2 AND task_name = $3",
+		"SELECT id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2",
+		"SELECT id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3",
+	}
+	required := []string{
+		"SELECT feature_id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2",
+		"SELECT task_id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3",
+	}
+
+	source := queriesSourceForContractTest()
+	for _, fragment := range forbidden {
+		if strings.Contains(source, fragment) {
+			t.Fatalf("query layer must resolve references by public UUID columns only; found %q", fragment)
+		}
+	}
+	for _, fragment := range required {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("query layer must resolve public UUID references; missing %q", fragment)
+		}
+	}
+}
+
+func queriesSourceForContractTest() string {
+	data, err := os.ReadFile("queries.go")
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
 }

@@ -273,7 +273,7 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 	return out, rows.Err()
 }
 
-// GetWorkspaceFeature returns a single feature by internal row UUID.
+// GetWorkspaceFeature returns a single feature by feature UUID.
 // Returns ErrNotFound if no row exists.
 func (r *Reader) GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (WorkspaceFeature, error) {
 	uid, err := parseUUID(workspaceID)
@@ -485,7 +485,7 @@ func (r *Reader) ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]
 	return out, rows.Err()
 }
 
-// GetWorkspaceTask returns a single task by workspace UUID, feature row UUID, and task row UUID.
+// GetWorkspaceTask returns a single task by workspace, feature, and task UUIDs.
 // Returns ErrNotFound if no row exists.
 func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (WorkspaceTask, error) {
 	uid, err := parseUUID(workspaceID)
@@ -600,21 +600,14 @@ func parseUUID(s string) (pgtype.UUID, error) {
 }
 
 func (r *Reader) resolveFeatureID(ctx context.Context, workspaceID pgtype.UUID, featureIdentifier string) (pgtype.UUID, error) {
-	if fid, err := parseUUID(featureIdentifier); err == nil {
-		const q = `SELECT id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2`
-		var id pgtype.UUID
-		err := r.db.QueryRow(ctx, q, workspaceID, fid).Scan(&id)
-		if err == nil {
-			return id, nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return pgtype.UUID{}, err
-		}
+	fid, err := parseUUID(strings.TrimSpace(featureIdentifier))
+	if err != nil {
+		return pgtype.UUID{}, ErrNotFound
 	}
 
-	const q = `SELECT id FROM workspace_features WHERE workspace_id = $1 AND feature_name = $2`
+	const q = `SELECT feature_id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2`
 	var id pgtype.UUID
-	if err := r.db.QueryRow(ctx, q, workspaceID, strings.TrimSpace(featureIdentifier)).Scan(&id); err != nil {
+	if err := r.db.QueryRow(ctx, q, workspaceID, fid).Scan(&id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return pgtype.UUID{}, ErrNotFound
 		}
@@ -624,21 +617,14 @@ func (r *Reader) resolveFeatureID(ctx context.Context, workspaceID pgtype.UUID, 
 }
 
 func (r *Reader) resolveTaskID(ctx context.Context, workspaceID, featureID pgtype.UUID, taskIdentifier string) (pgtype.UUID, error) {
-	if tid, err := parseUUID(taskIdentifier); err == nil {
-		const q = `SELECT id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3`
-		var id pgtype.UUID
-		err := r.db.QueryRow(ctx, q, workspaceID, featureID, tid).Scan(&id)
-		if err == nil {
-			return id, nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return pgtype.UUID{}, err
-		}
+	tid, err := parseUUID(strings.TrimSpace(taskIdentifier))
+	if err != nil {
+		return pgtype.UUID{}, ErrNotFound
 	}
 
-	const q = `SELECT id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_name = $3`
+	const q = `SELECT task_id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3`
 	var id pgtype.UUID
-	if err := r.db.QueryRow(ctx, q, workspaceID, featureID, strings.TrimSpace(taskIdentifier)).Scan(&id); err != nil {
+	if err := r.db.QueryRow(ctx, q, workspaceID, featureID, tid).Scan(&id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return pgtype.UUID{}, ErrNotFound
 		}

@@ -81,7 +81,7 @@ func NewSyncRun(workspaceID, trigger, mode, status string) database.WorkspaceSyn
 // NewFeature creates a fake WorkspaceFeature row.
 func NewFeature(workspaceID, featureID, title, status, stage string) database.WorkspaceFeature {
 	var f database.WorkspaceFeature
-	if err := f.ID.Scan("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"); err != nil {
+	if err := f.ID.Scan("10101010-1010-1010-1010-101010101010"); err != nil {
 		panic(err)
 	}
 	if err := f.WorkspaceID.Scan(workspaceID); err != nil {
@@ -134,7 +134,7 @@ func NewDocument(workspaceID, featureID, docType, sourcePath, url string) databa
 // NewTask creates a fake WorkspaceTask row.
 func NewTask(workspaceID, featureID, taskID, title, status string, dependsOn []string) database.WorkspaceTask {
 	var t database.WorkspaceTask
-	if err := t.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd"); err != nil {
+	if err := t.ID.Scan("20202020-2020-2020-2020-202020202020"); err != nil {
 		panic(err)
 	}
 	if err := t.WorkspaceID.Scan(workspaceID); err != nil {
@@ -320,7 +320,7 @@ func (f *FakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, filters da
 
 func (f *FakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.Features {
-		if database.UUIDString(feat.ID) == featureID {
+		if database.UUIDString(feat.FeatureID) == featureID {
 			return feat, nil
 		}
 	}
@@ -331,13 +331,22 @@ func (f *FakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]databas
 	return f.Documents, nil
 }
 
-func (f *FakeDB) ListFeatureTasks(_ context.Context, _, _ string) ([]database.WorkspaceTask, error) {
-	return f.Tasks, nil
-}
-
-func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+func (f *FakeDB) ListFeatureTasks(_ context.Context, _, featureID string) ([]database.WorkspaceTask, error) {
 	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
 	for _, task := range f.Tasks {
+		if database.UUIDString(task.FeatureID) == featureID {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
+
+func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
+	for _, task := range f.Tasks {
+		if database.UUIDString(task.FeatureID) != featureID {
+			continue
+		}
 		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
 			continue
 		}
@@ -432,7 +441,7 @@ func taskNumber(taskID string) (int, bool) {
 
 func (f *FakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
 	for _, t := range f.Tasks {
-		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.ID) == taskID {
+		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
