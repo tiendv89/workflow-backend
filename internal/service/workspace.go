@@ -23,10 +23,12 @@ type DatabaseReader interface {
 	GetLatestSyncRun(ctx context.Context, workspaceID string) (database.WorkspaceSyncRun, error)
 	ListWorkspaceFeatures(ctx context.Context, workspaceID string) ([]database.WorkspaceFeature, error)
 	SearchWorkspaceFeatures(ctx context.Context, workspaceID string, filters database.FeatureSearchFilters) ([]database.WorkspaceFeature, error)
+	ListFeatureTaskCounts(ctx context.Context, workspaceID string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error)
 	GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (database.WorkspaceFeature, error)
 	ListFeatureDocuments(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceFeatureDocument, error)
 	ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceTask, error)
 	SearchFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
+	SearchWorkspaceTasks(ctx context.Context, workspaceID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
 	ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]database.WorkspaceTask, error)
 	GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (database.WorkspaceTask, error)
 	ListActivityEvents(ctx context.Context, workspaceID, featureID, taskID string) ([]database.WorkspaceActivityEvent, error)
@@ -174,18 +176,7 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	// Count tasks per feature for FeatureSummary.
-	taskCountsByFeature := make(map[string]map[string]int)
-	for _, t := range tasks {
-		featureID := database.UUIDString(t.FeatureID)
-		if _, ok := taskCountsByFeature[featureID]; !ok {
-			taskCountsByFeature[featureID] = make(map[string]int)
-		}
-		taskCountsByFeature[featureID]["total"]++
-		if t.Status != nil {
-			taskCountsByFeature[featureID][*t.Status]++
-		}
-	}
+	taskCountsByFeature := countTasksByFeature(tasks)
 
 	syncRun, err := s.db.GetLatestSyncRun(ctx, wsID)
 	var ss domain.SourceState
@@ -197,7 +188,7 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 
 	featureSummaries := make([]domain.FeatureSummary, 0, len(features))
 	for _, f := range features {
-		counts := taskCountsByFeature[database.UUIDString(f.ID)]
+		counts := taskCountsByFeature[database.UUIDString(f.FeatureID)]
 		featureSummaries = append(featureSummaries, domain.FeatureSummary{
 			ID:           database.UUIDString(f.ID),
 			FeatureID:    database.UUIDString(f.FeatureID),
@@ -207,14 +198,7 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 			CurrentStage: derefStr(f.CurrentStage),
 			Stages:       rawJSONOrNil(f.Stages),
 			UpdatedAt:    f.UpdatedAt.Time,
-			TaskCounts: domain.TaskCounts{
-				Total:      counts["total"],
-				Done:       counts["done"],
-				InProgress: counts["in_progress"],
-				Blocked:    counts["blocked"],
-				Ready:      counts["ready"],
-				Todo:       counts["todo"],
-			},
+			TaskCounts:   counts,
 		})
 	}
 
@@ -379,13 +363,19 @@ func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, fe
 	return out, domain.SourceError{}
 }
 
-// SearchTasks returns task summaries for a feature filtered by task_id, title, status, and/or repo.
+// SearchTasks returns task summaries for a feature filtered by search/task_id/title/status/repo.
 func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, featureID string, query domain.TaskSearchQuery) ([]domain.TaskSummary, domain.SourceError) {
+	if query.Page == 0 {
+		query.Page = 1
+	}
+	if query.Page < 1 {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "page must be greater than or equal to 1")
+	}
 	if query.Limit < 0 {
 		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be greater than or equal to 0")
 	}
 	if query.Sort != "" && !isValidTaskSearchSort(query.Sort) {
-		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of task_id_asc, task_id_desc, title_asc, title_desc, status_asc, status_desc, repo_asc, repo_desc, updated_at_asc, updated_at_desc, time_asc, time_desc")
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of task_id_asc, task_id_desc, title_asc, title_desc, status_asc, status_desc, repo_asc, repo_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
 	}
 
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
@@ -405,12 +395,58 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, database.UUIDString(feat.FeatureID), database.TaskSearchFilters{
+	filters := database.TaskSearchFilters{
 		TaskID: query.TaskID,
 		Title:  query.Title,
 		Status: query.Status,
 		Repo:   query.Repo,
 		Sort:   query.Sort,
+		Page:   query.Page,
+		Limit:  query.Limit,
+	}
+	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, database.UUIDString(feat.FeatureID), filters)
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	out := make([]domain.TaskSummary, 0, len(tasks))
+	for _, t := range tasks {
+		out = append(out, toTaskSummary(t))
+	}
+	return out, domain.SourceError{}
+}
+
+// SearchWorkspaceTasks returns task summaries for a workspace filtered by search/task_id/title/status/repo.
+func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID string, query domain.TaskSearchQuery) ([]domain.TaskSummary, domain.SourceError) {
+	if query.Page == 0 {
+		query.Page = 1
+	}
+	if query.Page < 1 {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "page must be greater than or equal to 1")
+	}
+	if query.Limit < 0 {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be greater than or equal to 0")
+	}
+	if query.Sort != "" && !isValidTaskSearchSort(query.Sort) {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of task_id_asc, task_id_desc, title_asc, title_desc, status_asc, status_desc, repo_asc, repo_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
+	}
+
+	ws, err := s.db.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+	wsID := database.UUIDString(ws.ID)
+
+	tasks, err := s.db.SearchWorkspaceTasks(ctx, wsID, database.TaskSearchFilters{
+		TaskID: query.TaskID,
+		Title:  query.Title,
+		Status: query.Status,
+		Repo:   query.Repo,
+		Sort:   query.Sort,
+		Page:   query.Page,
 		Limit:  query.Limit,
 	})
 	if err != nil {
@@ -424,13 +460,19 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 	return out, domain.SourceError{}
 }
 
-// SearchFeatures returns feature summaries for a workspace filtered by title and/or status.
+// SearchFeatures returns feature summaries for a workspace filtered by search/title/status.
 func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID string, query domain.FeatureSearchQuery) ([]domain.FeatureSummary, domain.SourceError) {
+	if query.Page == 0 {
+		query.Page = 1
+	}
+	if query.Page < 1 {
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "page must be greater than or equal to 1")
+	}
 	if query.Limit < 0 {
 		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be greater than or equal to 0")
 	}
 	if query.Sort != "" && !isValidSearchSort(query.Sort) {
-		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of title_asc, title_desc, status_asc, status_desc, updated_at_asc, updated_at_desc, time_asc, time_desc")
+		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of title_asc, title_desc, status_asc, status_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
 	}
 
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
@@ -446,31 +488,22 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 		Title:  query.Title,
 		Status: query.Status,
 		Sort:   query.Sort,
+		Page:   query.Page,
 		Limit:  query.Limit,
 	})
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	tasks, err := s.db.ListWorkspaceTasks(ctx, wsID)
+	countRows, err := s.db.ListFeatureTaskCounts(ctx, wsID, featureIDs(features))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	taskCountsByFeature := make(map[string]map[string]int)
-	for _, t := range tasks {
-		featureID := database.UUIDString(t.FeatureID)
-		if _, ok := taskCountsByFeature[featureID]; !ok {
-			taskCountsByFeature[featureID] = make(map[string]int)
-		}
-		taskCountsByFeature[featureID]["total"]++
-		if t.Status != nil {
-			taskCountsByFeature[featureID][*t.Status]++
-		}
-	}
+	taskCountsByFeature := taskCountsFromRows(countRows)
 
 	out := make([]domain.FeatureSummary, 0, len(features))
 	for _, f := range features {
-		counts := taskCountsByFeature[database.UUIDString(f.ID)]
+		counts := taskCountsByFeature[database.UUIDString(f.FeatureID)]
 		out = append(out, domain.FeatureSummary{
 			ID:           database.UUIDString(f.ID),
 			FeatureID:    database.UUIDString(f.FeatureID),
@@ -480,14 +513,7 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 			CurrentStage: derefStr(f.CurrentStage),
 			Stages:       rawJSONOrNil(f.Stages),
 			UpdatedAt:    f.UpdatedAt.Time,
-			TaskCounts: domain.TaskCounts{
-				Total:      counts["total"],
-				Done:       counts["done"],
-				InProgress: counts["in_progress"],
-				Blocked:    counts["blocked"],
-				Ready:      counts["ready"],
-				Todo:       counts["todo"],
-			},
+			TaskCounts:   counts,
 		})
 	}
 	return out, domain.SourceError{}
@@ -679,7 +705,7 @@ func toActivityEvent(a database.WorkspaceActivityEvent) domain.ActivityEvent {
 
 func isValidSearchSort(sort string) bool {
 	switch sort {
-	case "title_asc", "title_desc", "status_asc", "status_desc", "updated_at_asc", "updated_at_desc", "time_asc", "time_desc":
+	case "title_asc", "title_desc", "status_asc", "status_desc", "updated_at_asc", "updated_at_desc", "time_asc", "time_desc", "createdAt", "-createdAt":
 		return true
 	default:
 		return false
@@ -688,11 +714,59 @@ func isValidSearchSort(sort string) bool {
 
 func isValidTaskSearchSort(sort string) bool {
 	switch sort {
-	case "task_id_asc", "task_id_desc", "title_asc", "title_desc", "status_asc", "status_desc", "repo_asc", "repo_desc", "updated_at_asc", "updated_at_desc", "time_asc", "time_desc":
+	case "task_id_asc", "task_id_desc", "title_asc", "title_desc", "status_asc", "status_desc", "repo_asc", "repo_desc", "updated_at_asc", "updated_at_desc", "time_asc", "time_desc", "createdAt", "-createdAt":
 		return true
 	default:
 		return false
 	}
+}
+
+func featureIDs(features []database.WorkspaceFeature) []string {
+	ids := make([]string, 0, len(features))
+	for _, feature := range features {
+		ids = append(ids, database.UUIDString(feature.FeatureID))
+	}
+	return ids
+}
+
+func taskCountsFromRows(rows []database.WorkspaceFeatureTaskCounts) map[string]domain.TaskCounts {
+	counts := make(map[string]domain.TaskCounts, len(rows))
+	for _, row := range rows {
+		counts[database.UUIDString(row.FeatureID)] = domain.TaskCounts{
+			Total:      int(row.Total),
+			Done:       int(row.Done),
+			InProgress: int(row.InProgress),
+			Blocked:    int(row.Blocked),
+			Ready:      int(row.Ready),
+			Todo:       int(row.Todo),
+		}
+	}
+	return counts
+}
+
+func countTasksByFeature(tasks []database.WorkspaceTask) map[string]domain.TaskCounts {
+	counts := make(map[string]domain.TaskCounts, len(tasks))
+	for _, t := range tasks {
+		featureID := database.UUIDString(t.FeatureID)
+		current := counts[featureID]
+		current.Total++
+		if t.Status != nil {
+			switch *t.Status {
+			case "done":
+				current.Done++
+			case "in_progress":
+				current.InProgress++
+			case "blocked":
+				current.Blocked++
+			case "ready":
+				current.Ready++
+			case "todo":
+				current.Todo++
+			}
+		}
+		counts[featureID] = current
+	}
+	return counts
 }
 
 func countTasks(tasks []database.WorkspaceTask) domain.TaskCounts {

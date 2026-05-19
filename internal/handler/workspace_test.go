@@ -75,6 +75,44 @@ func (f *fakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database.
 func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) ([]database.WorkspaceFeature, error) {
 	return f.features, nil
 }
+func (f *fakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error) {
+	counts := make(map[string]database.WorkspaceFeatureTaskCounts, len(featureIDs))
+	for _, featureID := range featureIDs {
+		var row database.WorkspaceFeatureTaskCounts
+		if err := row.FeatureID.Scan(featureID); err != nil {
+			return nil, err
+		}
+		counts[featureID] = row
+	}
+	for _, task := range f.tasks {
+		featureID := database.UUIDString(task.FeatureID)
+		row, ok := counts[featureID]
+		if !ok {
+			continue
+		}
+		row.Total++
+		if task.Status != nil {
+			switch *task.Status {
+			case "done":
+				row.Done++
+			case "in_progress":
+				row.InProgress++
+			case "blocked":
+				row.Blocked++
+			case "ready":
+				row.Ready++
+			case "todo":
+				row.Todo++
+			}
+		}
+		counts[featureID] = row
+	}
+	out := make([]database.WorkspaceFeatureTaskCounts, 0, len(featureIDs))
+	for _, featureID := range featureIDs {
+		out = append(out, counts[featureID])
+	}
+	return out, nil
+}
 func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.features {
 		if database.UUIDString(feat.FeatureID) == featureID {
@@ -105,6 +143,28 @@ func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filt
 			continue
 		}
 		if filters.Status != "" && (task.Status == nil || *task.Status != filters.Status) {
+			continue
+		}
+		out = append(out, task)
+	}
+	if filters.Limit > 0 && filters.Limit < len(out) {
+		out = out[:filters.Limit]
+	}
+	return out, nil
+}
+func (f *fakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
+			continue
+		}
+		if filters.Title != "" && !strings.Contains(strings.ToLower(task.Title), strings.ToLower(filters.Title)) {
+			continue
+		}
+		if filters.Status != "" && (task.Status == nil || *task.Status != filters.Status) {
+			continue
+		}
+		if filters.Repo != "" && (task.Repo == nil || *task.Repo != filters.Repo) {
 			continue
 		}
 		out = append(out, task)

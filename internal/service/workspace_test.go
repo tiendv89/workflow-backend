@@ -30,6 +30,9 @@ type fakeDB struct {
 	listSrcsErr error
 	getWSErr    error
 	getRunErr   error
+
+	listWorkspaceTasksCalls   int
+	searchWorkspaceTasksCalls int
 }
 
 func (f *fakeDB) ListWorkspaces(_ context.Context) ([]database.Workspace, error) {
@@ -91,6 +94,45 @@ func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database
 	return f.features, nil
 }
 
+func (f *fakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error) {
+	counts := make(map[string]database.WorkspaceFeatureTaskCounts, len(featureIDs))
+	for _, featureID := range featureIDs {
+		var row database.WorkspaceFeatureTaskCounts
+		if err := row.FeatureID.Scan(featureID); err != nil {
+			return nil, err
+		}
+		counts[featureID] = row
+	}
+	for _, task := range f.tasks {
+		featureID := database.UUIDString(task.FeatureID)
+		row, ok := counts[featureID]
+		if !ok {
+			continue
+		}
+		row.Total++
+		if task.Status != nil {
+			switch *task.Status {
+			case "done":
+				row.Done++
+			case "in_progress":
+				row.InProgress++
+			case "blocked":
+				row.Blocked++
+			case "ready":
+				row.Ready++
+			case "todo":
+				row.Todo++
+			}
+		}
+		counts[featureID] = row
+	}
+	out := make([]database.WorkspaceFeatureTaskCounts, 0, len(featureIDs))
+	for _, featureID := range featureIDs {
+		out = append(out, counts[featureID])
+	}
+	return out, nil
+}
+
 func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
 	for _, feat := range f.features {
 		if database.UUIDString(feat.FeatureID) == featureID {
@@ -145,7 +187,53 @@ func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filt
 }
 
 func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
+	f.listWorkspaceTasksCalls++
 	return f.tasks, nil
+}
+
+func (f *fakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	f.searchWorkspaceTasksCalls++
+	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
+			continue
+		}
+		if filters.Title != "" && !strings.Contains(strings.ToLower(task.Title), strings.ToLower(filters.Title)) {
+			continue
+		}
+		if filters.Status != "" && !statusMatches(task.Status, filters.Status) {
+			continue
+		}
+		if filters.Repo != "" && (task.Repo == nil || *task.Repo != filters.Repo) {
+			continue
+		}
+		out = append(out, task)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		switch filters.Sort {
+		case "task_id_desc":
+			return taskIDGreater(out[i].TaskName, out[j].TaskName)
+		case "task_id_asc", "":
+			return taskIDLess(out[i].TaskName, out[j].TaskName)
+		default:
+			return false
+		}
+	})
+	if filters.Limit > 0 {
+		start := (filters.Page - 1) * filters.Limit
+		if filters.Page < 1 {
+			start = 0
+		}
+		if start >= len(out) {
+			return []database.WorkspaceTask{}, nil
+		}
+		end := start + filters.Limit
+		if end > len(out) {
+			end = len(out)
+		}
+		out = out[start:end]
+	}
+	return out, nil
 }
 
 func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
@@ -205,6 +293,18 @@ const testTaskRowID = "44444444-4444-4444-4444-444444444444"
 
 func newService(db service.DatabaseReader, adp service.AdapterCaller) *service.WorkspaceService {
 	return service.New(db, adp, 30*time.Minute)
+}
+
+func statusMatches(status *string, filter string) bool {
+	if status == nil {
+		return false
+	}
+	for _, allowed := range strings.Split(filter, ",") {
+		if strings.TrimSpace(allowed) == *status {
+			return true
+		}
+	}
+	return false
 }
 
 func taskIDLess(a, b string) bool {
@@ -368,6 +468,48 @@ func TestGetWorkspace_Success(t *testing.T) {
 	}
 }
 
+func TestGetWorkspace_TaskCountsUsePublicFeatureID(t *testing.T) {
+	ws := makeUUID(testWSID)
+	feat := database.WorkspaceFeature{
+		FeatureName: "feature-1",
+		Title:       "Feature One",
+	}
+	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
+	feat.FeatureID.Scan(testFeatureRowID)
+	feat.WorkspaceID.Scan(testWSID)
+	feat.UpdatedAt.Scan(time.Now())
+
+	done := "done"
+	ready := "ready"
+	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T1", Title: "Task One", Status: &done}
+	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T2", Title: "Task Two", Status: &ready}
+	task1.FeatureID.Scan(testFeatureRowID)
+	task2.FeatureID.Scan(testFeatureRowID)
+	task1.WorkspaceID.Scan(testWSID)
+	task2.WorkspaceID.Scan(testWSID)
+	task1.UpdatedAt.Scan(time.Now())
+	task2.UpdatedAt.Scan(time.Now())
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
+		tasks:      []database.WorkspaceTask{task1, task2},
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	detail, se := svc.GetWorkspace(context.Background(), testWSID)
+	if se != (domain.SourceError{}) {
+		t.Fatalf("unexpected error: %v", se)
+	}
+	if len(detail.Features) != 1 {
+		t.Fatalf("expected 1 feature, got %d", len(detail.Features))
+	}
+	counts := detail.Features[0].TaskCounts
+	if counts.Total != 2 || counts.Done != 1 || counts.Ready != 1 {
+		t.Fatalf("expected counts to reflect public feature ID, got %+v", counts)
+	}
+}
+
 func TestSyncWorkspace_SuccessReturnsFreshData(t *testing.T) {
 	ws := makeUUID(testWSID)
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
@@ -523,6 +665,55 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("expected task order %v, got %v", want, got)
+		}
+	}
+}
+
+func TestSearchWorkspaceTasks_UsesQueryLayerAndPaginates(t *testing.T) {
+	ws := makeUUID(testWSID)
+	feat := database.WorkspaceFeature{
+		FeatureName: "feature-1",
+		Title:       "Feature One",
+	}
+	feat.FeatureID.Scan(testFeatureRowID)
+	feat.WorkspaceID.Scan(testWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	status := "ready"
+	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T1", Title: "Task One", Status: &status}
+	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T2", Title: "Task Two", Status: &status}
+	task10 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T10", Title: "Task Ten", Status: &status}
+	task1.FeatureID.Scan(testFeatureRowID)
+	task2.FeatureID.Scan(testFeatureRowID)
+	task10.FeatureID.Scan(testFeatureRowID)
+	task1.WorkspaceID.Scan(testWSID)
+	task2.WorkspaceID.Scan(testWSID)
+	task10.WorkspaceID.Scan(testWSID)
+	task1.UpdatedAt.Scan(time.Now())
+	task2.UpdatedAt.Scan(time.Now())
+	task10.UpdatedAt.Scan(time.Now())
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
+		tasks:      []database.WorkspaceTask{task1, task10, task2},
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	tasks, se := svc.SearchWorkspaceTasks(context.Background(), testWSID, domain.TaskSearchQuery{Sort: "task_id_asc", Page: 1, Limit: 2})
+	if se != (domain.SourceError{}) {
+		t.Fatalf("unexpected error: %v", se)
+	}
+	if db.searchWorkspaceTasksCalls != 1 {
+		t.Fatalf("expected search workspace tasks query to run once, got %d", db.searchWorkspaceTasksCalls)
+	}
+	if db.listWorkspaceTasksCalls != 0 {
+		t.Fatalf("expected list workspace tasks to stay unused, got %d calls", db.listWorkspaceTasksCalls)
+	}
+	got := []string{tasks[0].TaskName, tasks[1].TaskName}
+	want := []string{"T1", "T2"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected paged task order %v, got %v", want, got)
 		}
 	}
 }

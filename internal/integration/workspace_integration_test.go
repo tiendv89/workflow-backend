@@ -421,7 +421,7 @@ func TestSearchFeatures_FiltersSortsAndLimits(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/search/features?title=adapter&status=in_progress&sort=title_asc&limit=1")
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features?title=adapter&status=in_progress&sort=title_asc&limit=1")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -454,7 +454,7 @@ func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/search/tasks?title=adapter&status=in_progress&sort=title_desc&limit=1")
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks?title=adapter&status=in_progress&sort=title_desc&limit=1")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -469,6 +469,41 @@ func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
 	}
 	if tasks[0].TaskName != "T2" {
 		t.Errorf("expected T2 first for title_desc, got %s", tasks[0].TaskName)
+	}
+}
+
+func TestSearchWorkspaceTasks_FiltersSortsAndLimits(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
+	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "done", []string{})
+	t2 := testhelpers.NewTask(wsID, featureID, "T2", "Adapter wiring", "in_progress", []string{"T1"})
+	t10 := testhelpers.NewTask(wsID, featureID, "T10", "Final adapter verification", "in_progress", []string{"T2"})
+	t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	t10.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+		Tasks:      []database.WorkspaceTask{t1, t10, t2},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks?title=adapter&status=in_progress&sort=task_id_asc&limit=1&page=2")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var tasks []domain.TaskSummary
+	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected second paged task, got %d", len(tasks))
+	}
+	if tasks[0].TaskName != "T10" {
+		t.Errorf("expected T10 after numeric sort and page 2, got %s", tasks[0].TaskName)
 	}
 }
 
@@ -489,7 +524,7 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/search/tasks?sort=task_id_asc")
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks?sort=task_id_asc")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -518,7 +553,7 @@ func TestSearchTasks_InvalidLimit_400(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/search/tasks?limit=abc")
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks?limit=abc")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
@@ -532,7 +567,7 @@ func TestSearchFeatures_InvalidLimit_400(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp := get(t, srv, "/api/workspaces/"+wsID+"/search/features?limit=abc")
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/features?limit=abc")
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
@@ -768,6 +803,8 @@ func TestAllWorkspaceRoutes_Registered(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/workspaces"},
 		{http.MethodGet, "/api/workspaces/" + wsID},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/features"},
+		{http.MethodGet, "/api/workspaces/" + wsID + "/tasks"},
 		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureRowID},
 		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureRowID + "/tasks"},
 		{http.MethodGet, "/api/workspaces/" + wsID + "/features/" + featureRowID + "/tasks/" + taskRowID},

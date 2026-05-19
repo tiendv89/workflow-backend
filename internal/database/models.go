@@ -77,6 +77,16 @@ type WorkspaceTask struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
+type WorkspaceFeatureTaskCounts struct {
+	FeatureID  pgtype.UUID
+	Total      int64
+	Done       int64
+	InProgress int64
+	Blocked    int64
+	Ready      int64
+	Todo       int64
+}
+
 type WorkspaceActivityEvent struct {
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID

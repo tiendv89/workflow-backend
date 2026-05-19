@@ -24,6 +24,7 @@ type FeatureSearchFilters struct {
 	Title  string
 	Status string
 	Sort   string
+	Page   int
 	Limit  int
 }
 
@@ -34,6 +35,7 @@ type TaskSearchFilters struct {
 	Status string
 	Repo   string
 	Sort   string
+	Page   int
 	Limit  int
 }
 
@@ -208,7 +210,7 @@ func (r *Reader) ListWorkspaceFeatures(ctx context.Context, workspaceID string) 
 	return out, rows.Err()
 }
 
-// SearchWorkspaceFeatures returns workspace features filtered by title/status with safe sorting and limiting.
+// SearchWorkspaceFeatures returns workspace features filtered by search/title/status with safe sorting and limiting.
 func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string, filters FeatureSearchFilters) ([]WorkspaceFeature, error) {
 	uid, err := parseUUID(workspaceID)
 	if err != nil {
@@ -224,9 +226,18 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 		argPos++
 	}
 	if filters.Status != "" {
-		where = append(where, fmt.Sprintf("feature_status = $%d", argPos))
-		args = append(args, filters.Status)
-		argPos++
+		statuses := splitCSV(filters.Status)
+		if len(statuses) == 1 {
+			where = append(where, fmt.Sprintf("feature_status = $%d", argPos))
+			args = append(args, statuses[0])
+			argPos++
+		} else {
+			if len(statuses) > 1 {
+				where = append(where, fmt.Sprintf("feature_status = ANY($%d)", argPos))
+				args = append(args, statuses)
+				argPos++
+			}
+		}
 	}
 
 	orderBy := "updated_at DESC, feature_name ASC"
@@ -239,9 +250,9 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 		orderBy = "feature_status ASC NULLS LAST, feature_name ASC"
 	case "status_desc":
 		orderBy = "feature_status DESC NULLS LAST, feature_name ASC"
-	case "updated_at_asc", "time_asc":
+	case "updated_at_asc", "time_asc", "createdAt":
 		orderBy = "updated_at ASC, feature_name ASC"
-	case "updated_at_desc", "time_desc", "":
+	case "updated_at_desc", "time_desc", "-createdAt", "":
 		orderBy = "updated_at DESC, feature_name ASC"
 	}
 
@@ -249,6 +260,12 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 	if filters.Limit > 0 {
 		limitClause = fmt.Sprintf(" LIMIT $%d", argPos)
 		args = append(args, filters.Limit)
+		argPos++
+	}
+	offsetClause := ""
+	if filters.Page > 1 && filters.Limit > 0 {
+		offsetClause = fmt.Sprintf(" OFFSET $%d", argPos)
+		args = append(args, (filters.Page-1)*filters.Limit)
 	}
 
 	q := fmt.Sprintf(`
@@ -256,7 +273,7 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 		       stages, source_path, source_hash, created_at, updated_at
 		FROM workspace_features
 		WHERE %s
-		ORDER BY %s%s`, strings.Join(where, " AND "), orderBy, limitClause)
+		ORDER BY %s%s%s`, strings.Join(where, " AND "), orderBy, limitClause, offsetClause)
 	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -269,6 +286,57 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 			return nil, err
 		}
 		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// ListFeatureTaskCounts returns aggregated task counts for the requested features.
+func (r *Reader) ListFeatureTaskCounts(ctx context.Context, workspaceID string, featureIDs []string) ([]WorkspaceFeatureTaskCounts, error) {
+	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if len(featureIDs) == 0 {
+		return []WorkspaceFeatureTaskCounts{}, nil
+	}
+
+	args := make([]interface{}, 1, len(featureIDs)+1)
+	args[0] = uid
+	placeholders := make([]string, 0, len(featureIDs))
+	for _, featureID := range featureIDs {
+		fid, err := parseUUID(featureID)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, fid)
+		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+	}
+
+	const qTemplate = `
+		SELECT feature_id,
+		       count(*) AS total,
+		       count(*) FILTER (WHERE status = 'done') AS done,
+		       count(*) FILTER (WHERE status = 'in_progress') AS in_progress,
+		       count(*) FILTER (WHERE status = 'blocked') AS blocked,
+		       count(*) FILTER (WHERE status = 'ready') AS ready,
+		       count(*) FILTER (WHERE status = 'todo') AS todo
+		FROM workspace_tasks
+		WHERE workspace_id = $1 AND feature_id IN (%s)
+		GROUP BY feature_id`
+	q := fmt.Sprintf(qTemplate, strings.Join(placeholders, ", "))
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []WorkspaceFeatureTaskCounts
+	for rows.Next() {
+		var row WorkspaceFeatureTaskCounts
+		if err := rows.Scan(&row.FeatureID, &row.Total, &row.Done, &row.InProgress, &row.Blocked, &row.Ready, &row.Todo); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }
@@ -346,81 +414,17 @@ func (r *Reader) SearchFeatureTasks(ctx context.Context, workspaceID, featureID 
 		return nil, err
 	}
 
-	where := []string{"t.workspace_id = $1", "t.feature_id = $2"}
-	args := []interface{}{uid, fid}
-	argPos := 3
-	if filters.TaskID != "" {
-		where = append(where, fmt.Sprintf("t.task_name ILIKE $%d", argPos))
-		args = append(args, "%"+filters.TaskID+"%")
-		argPos++
-	}
-	if filters.Title != "" {
-		where = append(where, fmt.Sprintf("t.title ILIKE $%d", argPos))
-		args = append(args, "%"+filters.Title+"%")
-		argPos++
-	}
-	if filters.Status != "" {
-		where = append(where, fmt.Sprintf("t.status = $%d", argPos))
-		args = append(args, filters.Status)
-		argPos++
-	}
-	if filters.Repo != "" {
-		where = append(where, fmt.Sprintf("t.repo = $%d", argPos))
-		args = append(args, filters.Repo)
-		argPos++
-	}
+	return r.searchTasks(ctx, []string{"t.workspace_id = $1", "t.feature_id = $2"}, []interface{}{uid, fid}, 3, filters)
+}
 
-	orderBy := taskIDOrderAsc("t")
-	switch filters.Sort {
-	case "task_id_desc":
-		orderBy = taskIDOrderDesc("t")
-	case "title_asc":
-		orderBy = "t.title ASC, " + taskIDOrderAsc("t")
-	case "title_desc":
-		orderBy = "t.title DESC, " + taskIDOrderAsc("t")
-	case "status_asc":
-		orderBy = "t.status ASC NULLS LAST, " + taskIDOrderAsc("t")
-	case "status_desc":
-		orderBy = "t.status DESC NULLS LAST, " + taskIDOrderAsc("t")
-	case "repo_asc":
-		orderBy = "t.repo ASC NULLS LAST, " + taskIDOrderAsc("t")
-	case "repo_desc":
-		orderBy = "t.repo DESC NULLS LAST, " + taskIDOrderAsc("t")
-	case "updated_at_asc", "time_asc":
-		orderBy = "t.updated_at ASC, " + taskIDOrderAsc("t")
-	case "updated_at_desc", "time_desc":
-		orderBy = "t.updated_at DESC, " + taskIDOrderAsc("t")
-	case "task_id_asc", "":
-		orderBy = taskIDOrderAsc("t")
-	}
-
-	limitClause := ""
-	if filters.Limit > 0 {
-		limitClause = fmt.Sprintf(" LIMIT $%d", argPos)
-		args = append(args, filters.Limit)
-	}
-
-	q := fmt.Sprintf(`
-		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
-		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
-		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
-		FROM workspace_tasks t
-		WHERE %s
-		ORDER BY %s%s`, strings.Join(where, " AND "), orderBy, limitClause)
-	rows, err := r.db.Query(ctx, q, args...)
+// SearchWorkspaceTasks returns tasks for a workspace filtered by task_id/title/status/repo with safe sorting and limiting.
+func (r *Reader) SearchWorkspaceTasks(ctx context.Context, workspaceID string, filters TaskSearchFilters) ([]WorkspaceTask, error) {
+	uid, err := parseUUID(workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []WorkspaceTask
-	for rows.Next() {
-		var t WorkspaceTask
-		if err := scanTask(rows, &t); err != nil {
-			return nil, err
-		}
-		out = append(out, t)
-	}
-	return out, rows.Err()
+
+	return r.searchTasks(ctx, []string{"t.workspace_id = $1"}, []interface{}{uid}, 2, filters)
 }
 
 // ListFeatureTasks returns all tasks for a specific feature.
@@ -654,6 +658,107 @@ func activityFilterClause(featureID, taskID string, firstArg int) (string, []int
 		return "", nil, argPos, nil
 	}
 	return " AND " + strings.Join(where, " AND "), args, argPos, nil
+}
+
+func (r *Reader) searchTasks(ctx context.Context, where []string, args []interface{}, argPos int, filters TaskSearchFilters) ([]WorkspaceTask, error) {
+	if filters.TaskID != "" {
+		where = append(where, fmt.Sprintf("t.task_name ILIKE $%d", argPos))
+		args = append(args, "%"+filters.TaskID+"%")
+		argPos++
+	}
+	if filters.Title != "" {
+		where = append(where, fmt.Sprintf("t.title ILIKE $%d", argPos))
+		args = append(args, "%"+filters.Title+"%")
+		argPos++
+	}
+	if filters.Status != "" {
+		statuses := splitCSV(filters.Status)
+		if len(statuses) == 1 {
+			where = append(where, fmt.Sprintf("t.status = $%d", argPos))
+			args = append(args, statuses[0])
+			argPos++
+		} else if len(statuses) > 1 {
+			where = append(where, fmt.Sprintf("t.status = ANY($%d)", argPos))
+			args = append(args, statuses)
+			argPos++
+		}
+	}
+	if filters.Repo != "" {
+		where = append(where, fmt.Sprintf("t.repo = $%d", argPos))
+		args = append(args, filters.Repo)
+		argPos++
+	}
+
+	orderBy := taskIDOrderAsc("t")
+	switch filters.Sort {
+	case "task_id_desc":
+		orderBy = taskIDOrderDesc("t")
+	case "title_asc":
+		orderBy = "t.title ASC, " + taskIDOrderAsc("t")
+	case "title_desc":
+		orderBy = "t.title DESC, " + taskIDOrderAsc("t")
+	case "status_asc":
+		orderBy = "t.status ASC NULLS LAST, " + taskIDOrderAsc("t")
+	case "status_desc":
+		orderBy = "t.status DESC NULLS LAST, " + taskIDOrderAsc("t")
+	case "repo_asc":
+		orderBy = "t.repo ASC NULLS LAST, " + taskIDOrderAsc("t")
+	case "repo_desc":
+		orderBy = "t.repo DESC NULLS LAST, " + taskIDOrderAsc("t")
+	case "updated_at_asc", "time_asc", "createdAt":
+		orderBy = "t.updated_at ASC, " + taskIDOrderAsc("t")
+	case "updated_at_desc", "time_desc", "-createdAt":
+		orderBy = "t.updated_at DESC, " + taskIDOrderAsc("t")
+	case "task_id_asc", "":
+		orderBy = taskIDOrderAsc("t")
+	}
+
+	limitClause := ""
+	if filters.Limit > 0 {
+		limitClause = fmt.Sprintf(" LIMIT $%d", argPos)
+		args = append(args, filters.Limit)
+		argPos++
+	}
+	offsetClause := ""
+	if filters.Page > 1 && filters.Limit > 0 {
+		offsetClause = fmt.Sprintf(" OFFSET $%d", argPos)
+		args = append(args, (filters.Page-1)*filters.Limit)
+	}
+
+	q := fmt.Sprintf(`
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
+		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
+		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
+		FROM workspace_tasks t
+		WHERE %s
+		ORDER BY %s%s%s`, strings.Join(where, " AND "), orderBy, limitClause, offsetClause)
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []WorkspaceTask
+	for rows.Next() {
+		var t WorkspaceTask
+		if err := scanTask(rows, &t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 type rowScanner interface {

@@ -286,7 +286,7 @@ func (f *FakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, filters da
 		if filters.Title != "" && !strings.Contains(strings.ToLower(feature.Title), strings.ToLower(filters.Title)) {
 			continue
 		}
-		if filters.Status != "" && (feature.FeatureStatus == nil || *feature.FeatureStatus != filters.Status) {
+		if filters.Status != "" && !statusMatches(feature.FeatureStatus, filters.Status) {
 			continue
 		}
 		out = append(out, feature)
@@ -303,17 +303,55 @@ func (f *FakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, filters da
 			return derefString(a.FeatureStatus) < derefString(b.FeatureStatus)
 		case "status_desc":
 			return derefString(a.FeatureStatus) > derefString(b.FeatureStatus)
-		case "updated_at_asc", "time_asc":
+		case "updated_at_asc", "time_asc", "createdAt":
 			return a.UpdatedAt.Time.Before(b.UpdatedAt.Time)
-		case "updated_at_desc", "time_desc", "":
+		case "updated_at_desc", "time_desc", "-createdAt", "":
 			fallthrough
 		default:
 			return a.UpdatedAt.Time.After(b.UpdatedAt.Time)
 		}
 	})
 
-	if filters.Limit > 0 && filters.Limit < len(out) {
-		out = out[:filters.Limit]
+	return paginateFeatures(out, filters.Page, filters.Limit), nil
+}
+
+func (f *FakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error) {
+	counts := make(map[string]database.WorkspaceFeatureTaskCounts, len(featureIDs))
+	for _, featureID := range featureIDs {
+		var row database.WorkspaceFeatureTaskCounts
+		if err := row.FeatureID.Scan(featureID); err != nil {
+			return nil, err
+		}
+		counts[featureID] = row
+	}
+
+	for _, task := range f.Tasks {
+		featureID := database.UUIDString(task.FeatureID)
+		row, ok := counts[featureID]
+		if !ok {
+			continue
+		}
+		row.Total++
+		if task.Status != nil {
+			switch *task.Status {
+			case "done":
+				row.Done++
+			case "in_progress":
+				row.InProgress++
+			case "blocked":
+				row.Blocked++
+			case "ready":
+				row.Ready++
+			case "todo":
+				row.Todo++
+			}
+		}
+		counts[featureID] = row
+	}
+
+	out := make([]database.WorkspaceFeatureTaskCounts, 0, len(featureIDs))
+	for _, featureID := range featureIDs {
+		out = append(out, counts[featureID])
 	}
 	return out, nil
 }
@@ -353,7 +391,7 @@ func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filt
 		if filters.Title != "" && !strings.Contains(strings.ToLower(task.Title), strings.ToLower(filters.Title)) {
 			continue
 		}
-		if filters.Status != "" && (task.Status == nil || *task.Status != filters.Status) {
+		if filters.Status != "" && !statusMatches(task.Status, filters.Status) {
 			continue
 		}
 		if filters.Repo != "" && (task.Repo == nil || *task.Repo != filters.Repo) {
@@ -379,9 +417,9 @@ func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filt
 			return derefString(a.Repo) < derefString(b.Repo)
 		case "repo_desc":
 			return derefString(a.Repo) > derefString(b.Repo)
-		case "updated_at_asc", "time_asc":
+		case "updated_at_asc", "time_asc", "createdAt":
 			return a.UpdatedAt.Time.Before(b.UpdatedAt.Time)
-		case "updated_at_desc", "time_desc":
+		case "updated_at_desc", "time_desc", "-createdAt":
 			return a.UpdatedAt.Time.After(b.UpdatedAt.Time)
 		case "task_id_asc", "":
 			fallthrough
@@ -390,14 +428,109 @@ func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filt
 		}
 	})
 
-	if filters.Limit > 0 && filters.Limit < len(out) {
-		out = out[:filters.Limit]
+	return paginateTasks(out, filters.Page, filters.Limit), nil
+}
+
+func (f *FakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
+	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
+	for _, task := range f.Tasks {
+		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
+			continue
+		}
+		if filters.Title != "" && !strings.Contains(strings.ToLower(task.Title), strings.ToLower(filters.Title)) {
+			continue
+		}
+		if filters.Status != "" && !statusMatches(task.Status, filters.Status) {
+			continue
+		}
+		if filters.Repo != "" && (task.Repo == nil || *task.Repo != filters.Repo) {
+			continue
+		}
+		out = append(out, task)
 	}
-	return out, nil
+
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		switch filters.Sort {
+		case "task_id_desc":
+			return taskIDGreater(a.TaskName, b.TaskName)
+		case "title_asc":
+			return a.Title < b.Title
+		case "title_desc":
+			return a.Title > b.Title
+		case "status_asc":
+			return derefString(a.Status) < derefString(b.Status)
+		case "status_desc":
+			return derefString(a.Status) > derefString(b.Status)
+		case "repo_asc":
+			return derefString(a.Repo) < derefString(b.Repo)
+		case "repo_desc":
+			return derefString(a.Repo) > derefString(b.Repo)
+		case "updated_at_asc", "time_asc", "createdAt":
+			return a.UpdatedAt.Time.Before(b.UpdatedAt.Time)
+		case "updated_at_desc", "time_desc", "-createdAt":
+			return a.UpdatedAt.Time.After(b.UpdatedAt.Time)
+		case "task_id_asc", "":
+			fallthrough
+		default:
+			return taskIDLess(a.TaskName, b.TaskName)
+		}
+	})
+
+	return paginateTasks(out, filters.Page, filters.Limit), nil
 }
 
 func (f *FakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
 	return f.Tasks, nil
+}
+
+func paginateFeatures(features []database.WorkspaceFeature, page, limit int) []database.WorkspaceFeature {
+	if limit <= 0 {
+		return features
+	}
+	start := pageOffset(page, limit)
+	if start >= len(features) {
+		return []database.WorkspaceFeature{}
+	}
+	end := start + limit
+	if end > len(features) {
+		end = len(features)
+	}
+	return features[start:end]
+}
+
+func paginateTasks(tasks []database.WorkspaceTask, page, limit int) []database.WorkspaceTask {
+	if limit <= 0 {
+		return tasks
+	}
+	start := pageOffset(page, limit)
+	if start >= len(tasks) {
+		return []database.WorkspaceTask{}
+	}
+	end := start + limit
+	if end > len(tasks) {
+		end = len(tasks)
+	}
+	return tasks[start:end]
+}
+
+func pageOffset(page, limit int) int {
+	if page < 1 {
+		page = 1
+	}
+	return (page - 1) * limit
+}
+
+func statusMatches(status *string, filter string) bool {
+	if status == nil {
+		return false
+	}
+	for _, allowed := range strings.Split(filter, ",") {
+		if strings.TrimSpace(allowed) == *status {
+			return true
+		}
+	}
+	return false
 }
 
 func derefString(s *string) string {

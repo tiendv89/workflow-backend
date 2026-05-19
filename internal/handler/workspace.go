@@ -26,11 +26,11 @@ func (h *WorkspaceHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/workspaces", h.ListWorkspaces)
 	rg.POST("/workspaces/import", h.ImportWorkspace)
 	rg.GET("/workspaces/:workspaceId", h.GetWorkspace)
-	rg.GET("/workspaces/:workspaceId/search/features", h.SearchFeatures)
-	rg.GET("/workspaces/:workspaceId/features/:featureId/search/tasks", h.SearchTasks)
+	rg.GET("/workspaces/:workspaceId/features", h.SearchFeatures)
+	rg.GET("/workspaces/:workspaceId/tasks", h.SearchWorkspaceTasks)
 	rg.POST("/workspaces/:workspaceId/sync", h.SyncWorkspace)
 	rg.GET("/workspaces/:workspaceId/features/:featureId", h.GetFeature)
-	rg.GET("/workspaces/:workspaceId/features/:featureId/tasks", h.ListFeatureTasks)
+	rg.GET("/workspaces/:workspaceId/features/:featureId/tasks", h.SearchTasks)
 	rg.GET("/workspaces/:workspaceId/features/:featureId/tasks/:taskId", h.GetTask)
 	rg.GET("/workspaces/:workspaceId/activity", h.ListActivity)
 }
@@ -81,10 +81,10 @@ func (h *WorkspaceHandler) GetWorkspace(c *gin.Context) {
 }
 
 // SearchFeatures godoc
-// GET /api/workspaces/:workspaceId/search/features?title=&status=&sort=&limit=
+// GET /api/workspaces/:workspaceId/features?title=&status=&sort=&page=&limit=
 func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
-	limit, ok := parseLimit(c)
+	page, limit, ok := parsePagination(c)
 	if !ok {
 		return
 	}
@@ -93,6 +93,7 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 		Title:  c.Query("title"),
 		Status: c.Query("status"),
 		Sort:   c.Query("sort"),
+		Page:   page,
 		Limit:  limit,
 	})
 	if se != (domain.SourceError{}) {
@@ -103,11 +104,11 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 }
 
 // SearchTasks godoc
-// GET /api/workspaces/:workspaceId/features/:featureId/search/tasks?task_id=&title=&status=&repo=&sort=&limit=
+// GET /api/workspaces/:workspaceId/features/:featureId/tasks?task_id=&title=&status=&repo=&sort=&page=&limit=
 func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
 	featureID := c.Param("featureId")
-	limit, ok := parseLimit(c)
+	page, limit, ok := parsePagination(c)
 	if !ok {
 		return
 	}
@@ -118,6 +119,32 @@ func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
 		Status: c.Query("status"),
 		Repo:   c.Query("repo"),
 		Sort:   c.Query("sort"),
+		Page:   page,
+		Limit:  limit,
+	})
+	if se != (domain.SourceError{}) {
+		respondSourceError(c, se, nil)
+		return
+	}
+	c.JSON(http.StatusOK, tasks)
+}
+
+// SearchWorkspaceTasks godoc
+// GET /api/workspaces/:workspaceId/tasks?task_id=&title=&status=&repo=&sort=&page=&limit=
+func (h *WorkspaceHandler) SearchWorkspaceTasks(c *gin.Context) {
+	workspaceID := c.Param("workspaceId")
+	page, limit, ok := parsePagination(c)
+	if !ok {
+		return
+	}
+
+	tasks, se := h.svc.SearchWorkspaceTasks(c.Request.Context(), workspaceID, domain.TaskSearchQuery{
+		TaskID: c.Query("task_id"),
+		Title:  c.Query("title"),
+		Status: c.Query("status"),
+		Repo:   c.Query("repo"),
+		Sort:   c.Query("sort"),
+		Page:   page,
 		Limit:  limit,
 	})
 	if se != (domain.SourceError{}) {
@@ -211,17 +238,31 @@ func respondError(c *gin.Context, err error) {
 	})
 }
 
-func parseLimit(c *gin.Context) (int, bool) {
+func parsePagination(c *gin.Context) (int, int, bool) {
+	page := 1
+	if rawPage := c.Query("page"); rawPage != "" {
+		parsed, err := strconv.Atoi(rawPage)
+		if err != nil {
+			respondSourceError(c, domain.NewValidationError(domain.ErrValidationInvalidQuery, "page must be an integer"), nil)
+			return 0, 0, false
+		}
+		if parsed < 1 {
+			respondSourceError(c, domain.NewValidationError(domain.ErrValidationInvalidQuery, "page must be greater than or equal to 1"), nil)
+			return 0, 0, false
+		}
+		page = parsed
+	}
+
 	limit := 0
 	if rawLimit := c.Query("limit"); rawLimit != "" {
 		parsed, err := strconv.Atoi(rawLimit)
 		if err != nil {
 			respondSourceError(c, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be an integer"), nil)
-			return 0, false
+			return 0, 0, false
 		}
 		limit = parsed
 	}
-	return limit, true
+	return page, limit, true
 }
 
 func respondSourceError(c *gin.Context, se domain.SourceError, cachedData interface{}) {

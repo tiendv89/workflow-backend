@@ -43,16 +43,18 @@ type FeatureSearchQuery struct {
 	Title  string
 	Status string
 	Sort   string
+	Page   int
 	Limit  int
 }
 
-// TaskSearchQuery filters and controls feature task search results.
+// TaskSearchQuery filters and controls task search results.
 type TaskSearchQuery struct {
 	TaskID string
 	Title  string
 	Status string
 	Repo   string
 	Sort   string
+	Page   int
 	Limit  int
 }
 
