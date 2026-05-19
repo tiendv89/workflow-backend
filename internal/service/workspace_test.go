@@ -33,6 +33,8 @@ type fakeDB struct {
 
 	listWorkspaceTasksCalls   int
 	searchWorkspaceTasksCalls int
+	getWorkspaceTaskCalls     int
+	getWorkspaceTaskByIDCalls int
 }
 
 func (f *fakeDB) ListWorkspaces(_ context.Context) ([]database.Workspace, error) {
@@ -237,8 +239,19 @@ func (f *fakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters datab
 }
 
 func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
+	f.getWorkspaceTaskCalls++
 	for _, t := range f.tasks {
 		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.TaskID) == taskID {
+			return t, nil
+		}
+	}
+	return database.WorkspaceTask{}, database.ErrNotFound
+}
+
+func (f *fakeDB) GetWorkspaceTaskByID(_ context.Context, workspaceID, taskID string) (database.WorkspaceTask, error) {
+	f.getWorkspaceTaskByIDCalls++
+	for _, t := range f.tasks {
+		if database.UUIDString(t.WorkspaceID) == workspaceID && database.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
@@ -806,6 +819,66 @@ func TestGetTask_Success(t *testing.T) {
 	}
 	if detail.PRRefs[0].Repo != "workflow-backend" {
 		t.Fatalf("expected PR ref repo workflow-backend, got %q", detail.PRRefs[0].Repo)
+	}
+}
+
+func TestGetWorkspaceTask_Success(t *testing.T) {
+	ws := makeUUID(testWSID)
+	status := "in_progress"
+	taskStatus := &status
+	repo := "workflow-backend"
+	feat := database.WorkspaceFeature{
+		FeatureName: "feature-1",
+		Title:       "Feature One",
+	}
+	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
+	feat.FeatureID.Scan(testFeatureRowID)
+	feat.WorkspaceID.Scan(testWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	task := database.WorkspaceTask{
+		FeatureName: "feature-1",
+		TaskName:    "T1",
+		Title:       "My Task",
+		Status:      taskStatus,
+		Repo:        &repo,
+		DependsOn:   []byte(`["T0"]`),
+		Execution:   []byte(`{"actor_type":"agent"}`),
+		Pr:          []byte(`{"url":"https://github.com/tiendv89/workflow-backend/pull/3","status":"open"}`),
+	}
+	task.ID.Scan("77777777-7777-7777-7777-777777777777")
+	task.TaskID.Scan(testTaskRowID)
+	task.FeatureID.Scan(testFeatureRowID)
+	task.WorkspaceID.Scan(testWSID)
+	task.UpdatedAt.Scan(time.Now())
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
+		tasks:      []database.WorkspaceTask{task},
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	detail, se := svc.GetWorkspaceTask(context.Background(), testWSID, testTaskRowID)
+	if se != (domain.SourceError{}) {
+		t.Fatalf("unexpected error: %v", se)
+	}
+	if detail.TaskID != testTaskRowID {
+		t.Errorf("expected task id %s, got %s", testTaskRowID, detail.TaskID)
+	}
+	if detail.FeatureID != testFeatureRowID {
+		t.Errorf("expected feature id %s, got %s", testFeatureRowID, detail.FeatureID)
+	}
+	if len(detail.PRRefs) != 1 {
+		t.Fatalf("expected one PR ref, got %d", len(detail.PRRefs))
+	}
+	if detail.PRRefs[0].Repo != "workflow-backend" {
+		t.Fatalf("expected PR ref repo workflow-backend, got %q", detail.PRRefs[0].Repo)
+	}
+	if db.getWorkspaceTaskByIDCalls != 1 {
+		t.Fatalf("expected GetWorkspaceTaskByID to run once, got %d", db.getWorkspaceTaskByIDCalls)
+	}
+	if db.getWorkspaceTaskCalls != 0 {
+		t.Fatalf("expected feature-scoped task lookup to stay unused, got %d calls", db.getWorkspaceTaskCalls)
 	}
 }
 

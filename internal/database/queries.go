@@ -525,6 +525,34 @@ func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, t
 	return t, nil
 }
 
+// GetWorkspaceTaskByID returns a single task by workspace and task UUID.
+// Returns ErrNotFound if no row exists.
+func (r *Reader) GetWorkspaceTaskByID(ctx context.Context, workspaceID, taskID string) (WorkspaceTask, error) {
+	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return WorkspaceTask{}, err
+	}
+	tid, err := parseUUID(strings.TrimSpace(taskID))
+	if err != nil {
+		return WorkspaceTask{}, ErrNotFound
+	}
+	const q = `
+		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
+		       t.repo, t.status, t.depends_on, t.blocked_reason, t.branch, t.execution,
+		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
+		FROM workspace_tasks t
+		WHERE t.workspace_id = $1 AND t.task_id = $2`
+	row := r.db.QueryRow(ctx, q, uid, tid)
+	var t WorkspaceTask
+	if err := scanTask(row, &t); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WorkspaceTask{}, ErrNotFound
+		}
+		return WorkspaceTask{}, err
+	}
+	return t, nil
+}
+
 // ListActivityEvents returns activity events for a workspace filtered by scope.
 func (r *Reader) ListActivityEvents(ctx context.Context, workspaceID, featureID, taskID string) ([]WorkspaceActivityEvent, error) {
 	uid, err := parseUUID(workspaceID)

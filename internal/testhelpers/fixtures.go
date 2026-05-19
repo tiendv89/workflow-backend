@@ -581,6 +581,15 @@ func (f *FakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string
 	return database.WorkspaceTask{}, database.ErrNotFound
 }
 
+func (f *FakeDB) GetWorkspaceTaskByID(_ context.Context, workspaceID, taskID string) (database.WorkspaceTask, error) {
+	for _, t := range f.Tasks {
+		if database.UUIDString(t.WorkspaceID) == workspaceID && database.UUIDString(t.TaskID) == taskID {
+			return t, nil
+		}
+	}
+	return database.WorkspaceTask{}, database.ErrNotFound
+}
+
 func (f *FakeDB) ListActivityEvents(_ context.Context, _, featureID, taskID string) ([]database.WorkspaceActivityEvent, error) {
 	out := make([]database.WorkspaceActivityEvent, 0, len(f.Activity))
 	for _, event := range f.Activity {

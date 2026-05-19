@@ -28,6 +28,7 @@ func (h *WorkspaceHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/workspaces/:workspaceId", h.GetWorkspace)
 	rg.GET("/workspaces/:workspaceId/features", h.SearchFeatures)
 	rg.GET("/workspaces/:workspaceId/tasks", h.SearchWorkspaceTasks)
+	rg.GET("/workspaces/:workspaceId/tasks/:taskId", h.GetWorkspaceTask)
 	rg.POST("/workspaces/:workspaceId/sync", h.SyncWorkspace)
 	rg.GET("/workspaces/:workspaceId/features/:featureId", h.GetFeature)
 	rg.GET("/workspaces/:workspaceId/features/:featureId/tasks", h.SearchTasks)
@@ -152,6 +153,19 @@ func (h *WorkspaceHandler) SearchWorkspaceTasks(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, tasks)
+}
+
+// GetWorkspaceTask godoc
+// GET /api/workspaces/:workspaceId/tasks/:taskId
+func (h *WorkspaceHandler) GetWorkspaceTask(c *gin.Context) {
+	workspaceID := c.Param("workspaceId")
+	taskID := c.Param("taskId")
+	detail, se := h.svc.GetWorkspaceTask(c.Request.Context(), workspaceID, taskID)
+	if se != (domain.SourceError{}) {
+		respondSourceError(c, se, nil)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
 }
 
 // SyncWorkspace godoc

@@ -134,6 +134,18 @@ func TestReaderIntegration_UUIDReferencesWithNameMetadata(t *testing.T) {
 		t.Fatalf("GetWorkspaceTask by name must not resolve references, got %v", err)
 	}
 
+	workspaceTask, err := reader.GetWorkspaceTaskByID(ctx, workspaceID, taskID)
+	if err != nil {
+		t.Fatalf("GetWorkspaceTaskByID by workspace and task UUID: %v", err)
+	}
+	if workspaceTask.FeatureName != "workspace-data-backend" {
+		t.Fatalf("FeatureName = %q, want workspace-data-backend", workspaceTask.FeatureName)
+	}
+
+	if _, err := reader.GetWorkspaceTaskByID(ctx, workspaceID, "T1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetWorkspaceTaskByID by name must not resolve references, got %v", err)
+	}
+
 	events, err := reader.ListActivityEvents(ctx, workspaceID, featureID, taskID)
 	if err != nil {
 		t.Fatalf("ListActivityEvents by UUID refs: %v", err)

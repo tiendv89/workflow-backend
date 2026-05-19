@@ -619,6 +619,39 @@ func TestGetTask_Detail_UsesUUIDFeatureAndTaskIDs(t *testing.T) {
 	}
 }
 
+func TestGetWorkspaceTask_Detail_UsesUUIDWorkspaceAndTaskIDs(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	feat := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "build")
+	task := testhelpers.NewTask(wsID, featureID, taskID, "Task One", "done", []string{"T0"})
+	event := testhelpers.NewActivityEvent(wsID, featureID, taskID, "done", "human@example.com", "Approved", 0)
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Features:   []database.WorkspaceFeature{feat},
+		Tasks:      []database.WorkspaceTask{task},
+		Activity:   []database.WorkspaceActivityEvent{event},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks/"+taskRowID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var detail domain.TaskDetail
+	json.NewDecoder(resp.Body).Decode(&detail)
+	if detail.TaskID != taskRowID {
+		t.Errorf("expected task_id %s, got %s", taskRowID, detail.TaskID)
+	}
+	if detail.FeatureID != featureRowID {
+		t.Errorf("expected feature_id %s, got %s", featureRowID, detail.FeatureID)
+	}
+	if len(detail.Activity) != 1 {
+		t.Errorf("expected 1 activity event, got %d", len(detail.Activity))
+	}
+}
+
 func TestGetTask_NotFound_404(t *testing.T) {
 	ws := testhelpers.NewWorkspace(wsID, "W", "w")
 	db := &testhelpers.FakeDB{Workspaces: []database.Workspace{ws}}

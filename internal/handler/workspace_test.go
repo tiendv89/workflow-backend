@@ -186,6 +186,16 @@ func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string
 	}
 	return database.WorkspaceTask{}, database.ErrNotFound
 }
+
+func (f *fakeDB) GetWorkspaceTaskByID(_ context.Context, workspaceID, taskID string) (database.WorkspaceTask, error) {
+	for _, t := range f.tasks {
+		if database.UUIDString(t.WorkspaceID) == workspaceID && database.UUIDString(t.TaskID) == taskID {
+			return t, nil
+		}
+	}
+	return database.WorkspaceTask{}, database.ErrNotFound
+}
+
 func (f *fakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]database.WorkspaceActivityEvent, error) {
 	return f.activity, nil
 }
@@ -550,6 +560,57 @@ func TestGetTask_200(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetWorkspaceTask_200(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	status := "in_progress"
+	feat := database.WorkspaceFeature{
+		FeatureName: "feature-1",
+		Title:       "Feature One",
+	}
+	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
+	feat.FeatureID.Scan(handlerTestFeatureRowID)
+	feat.WorkspaceID.Scan(handlerTestWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	task := database.WorkspaceTask{
+		FeatureName: "feature-1",
+		TaskName:    "T1",
+		Title:       "Task One",
+		Status:      &status,
+		DependsOn:   []byte(`[]`),
+		Execution:   []byte(`{"actor_type":"agent"}`),
+	}
+	task.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	task.TaskID.Scan(handlerTestTaskRowID)
+	task.FeatureID.Scan(handlerTestFeatureRowID)
+	task.WorkspaceID.Scan(handlerTestWSID)
+	task.UpdatedAt.Scan(time.Now())
+
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		features:   []database.WorkspaceFeature{feat},
+		tasks:      []database.WorkspaceTask{task},
+	}
+	r := newTestRouter(db, &fakeAdapter{})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/tasks/"+handlerTestTaskRowID, nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var detail domain.TaskDetail
+	if err := json.NewDecoder(w.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if detail.TaskID != handlerTestTaskRowID {
+		t.Errorf("expected task_id %s, got %s", handlerTestTaskRowID, detail.TaskID)
+	}
+	if detail.FeatureID != handlerTestFeatureRowID {
+		t.Errorf("expected feature_id %s, got %s", handlerTestFeatureRowID, detail.FeatureID)
 	}
 }
 

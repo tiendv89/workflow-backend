@@ -31,6 +31,7 @@ type DatabaseReader interface {
 	SearchWorkspaceTasks(ctx context.Context, workspaceID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
 	ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]database.WorkspaceTask, error)
 	GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (database.WorkspaceTask, error)
+	GetWorkspaceTaskByID(ctx context.Context, workspaceID, taskID string) (database.WorkspaceTask, error)
 	ListActivityEvents(ctx context.Context, workspaceID, featureID, taskID string) ([]database.WorkspaceActivityEvent, error)
 }
 
@@ -551,6 +552,37 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
+	return taskDetailFromRow(workspaceID, t, activity), domain.SourceError{}
+}
+
+// GetWorkspaceTask returns full task detail for a task in a workspace.
+func (s *WorkspaceService) GetWorkspaceTask(ctx context.Context, workspaceID, taskID string) (*domain.TaskDetail, domain.SourceError) {
+	ws, err := s.db.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+	wsID := database.UUIDString(ws.ID)
+
+	t, err := s.db.GetWorkspaceTaskByID(ctx, wsID, taskID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("task", taskID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	activity, err := s.db.ListActivityEvents(ctx, wsID, database.UUIDString(t.FeatureID), database.UUIDString(t.TaskID))
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	return taskDetailFromRow(workspaceID, t, activity), domain.SourceError{}
+}
+
+func taskDetailFromRow(workspaceID string, t database.WorkspaceTask, activity []database.WorkspaceActivityEvent) *domain.TaskDetail {
 	activityEvents := make([]domain.ActivityEvent, 0, len(activity))
 	for _, a := range activity {
 		activityEvents = append(activityEvents, toActivityEvent(a))
@@ -601,7 +633,7 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 		Execution:     execCtx,
 		PRRefs:        prRefs,
 		Activity:      activityEvents,
-	}, domain.SourceError{}
+	}
 }
 
 // ListActivity returns activity events for a workspace.
