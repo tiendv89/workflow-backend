@@ -165,9 +165,3 @@ type ImportInput struct {
 	DefaultBranch string `json:"default_branch"`
 	Name          string `json:"name"`
 }
-
-// ImportResult is returned after adapter-service accepts an import request.
-type ImportResult struct {
-	ID     string `json:"workspace_id"`
-	Status string `json:"status"`
-}

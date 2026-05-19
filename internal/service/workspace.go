@@ -105,8 +105,9 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 	return out, nil
 }
 
-// ImportWorkspace calls adapter-service to accept a workspace import request.
-func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.ImportInput) (*domain.ImportResult, domain.SourceError) {
+// ImportWorkspace calls adapter-service to import/persist a workspace, then
+// returns the normalized persisted detail from PostgreSQL.
+func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.ImportInput) (*domain.WorkspaceDetail, domain.SourceError) {
 	workspaceID, err := s.adapter.ImportWorkspace(ctx, adapter.ImportRequest{
 		RepoURL:       input.RepoURL,
 		DefaultBranch: input.DefaultBranch,
@@ -119,10 +120,7 @@ func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.Imp
 		return nil, domain.NewAdapterError(domain.ErrAdapterInternal, err.Error())
 	}
 
-	return &domain.ImportResult{
-		ID:     workspaceID,
-		Status: "accepted",
-	}, domain.SourceError{}
+	return s.GetWorkspace(ctx, workspaceID)
 }
 
 // GetWorkspaceSummary returns only basic workspace information without loading features/tasks.

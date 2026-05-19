@@ -58,11 +58,23 @@ func post(t *testing.T, srv *httptest.Server, path, body string) *http.Response 
 	return resp
 }
 
-// --- T5 scenario 1: first import — accepted by adapter and queued for sync ---
+// --- T5 scenario 1: first import — persisted by adapter and returned as normalized detail ---
 
-func TestImport_FirstImport_202WithAcceptedWorkspaceID(t *testing.T) {
+func TestImport_FirstImport_200WithWorkspaceDetail(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "My Workspace", "my-workspace")
+	feature := testhelpers.NewFeature(wsID, featureID, "Workspace Data Backend", "in_progress", "implementation")
+	task := testhelpers.NewTask(wsID, featureID, taskID, "Implement API", "ready", nil)
+	src := testhelpers.NewGitHubSource(wsID, repoURL)
+	successRun := testhelpers.NewSyncRun(wsID, "api_import", "full", "success")
+	if err := successRun.FinishedAt.Scan(time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	db := &testhelpers.FakeDB{
-		GitHubSrcs: map[string]database.WorkspaceGitHubSource{},
+		Workspaces: []database.Workspace{ws},
+		SyncRuns:   []database.WorkspaceSyncRun{successRun},
+		Features:   []database.WorkspaceFeature{feature},
+		Tasks:      []database.WorkspaceTask{task},
+		GitHubSrcs: map[string]database.WorkspaceGitHubSource{wsID: src},
 	}
 	adp := &testhelpers.FakeAdapter{ImportedWorkspaceID: wsID}
 	srv := newServer(db, adp)
@@ -72,18 +84,27 @@ func TestImport_FirstImport_202WithAcceptedWorkspaceID(t *testing.T) {
 		`{"repo_url":"https://github.com/testorg/test-repo","name":"My Workspace"}`)
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var result domain.ImportResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	var detail domain.WorkspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if result.ID != wsID {
-		t.Errorf("expected workspace ID %s, got %s", wsID, result.ID)
+	if detail.ID != wsID {
+		t.Errorf("expected workspace ID %s, got %s", wsID, detail.ID)
 	}
-	if result.Status != "accepted" {
-		t.Errorf("expected status accepted, got %q", result.Status)
+	if detail.RepoURL != repoURL {
+		t.Errorf("expected repo_url %s, got %s", repoURL, detail.RepoURL)
+	}
+	if detail.SourceState.Stale {
+		t.Error("expected fresh source_state after completed import")
+	}
+	if len(detail.Features) != 1 {
+		t.Errorf("expected imported feature summary, got %d features", len(detail.Features))
+	}
+	if len(detail.Tasks) != 1 {
+		t.Errorf("expected imported task summary, got %d tasks", len(detail.Tasks))
 	}
 }
 

@@ -4,13 +4,19 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 )
 
 func TestReaderIntegration_UUIDReferencesWithNameMetadata(t *testing.T) {
@@ -30,12 +36,13 @@ func TestReaderIntegration_UUIDReferencesWithNameMetadata(t *testing.T) {
 		adminPool.Close()
 		t.Fatalf("ping admin db: %v", err)
 	}
-	if _, err := adminPool.Exec(ctx, `CREATE SCHEMA `+schemaName); err != nil {
+	quotedSchemaName := pgx.Identifier{schemaName}.Sanitize()
+	if _, err := adminPool.Exec(ctx, `CREATE SCHEMA `+quotedSchemaName); err != nil {
 		adminPool.Close()
 		t.Fatalf("create test schema: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = adminPool.Exec(context.Background(), `DROP SCHEMA IF EXISTS `+schemaName+` CASCADE`)
+		_, _ = adminPool.Exec(context.Background(), `DROP SCHEMA IF EXISTS `+quotedSchemaName+` CASCADE`)
 		adminPool.Close()
 	})
 
@@ -58,9 +65,7 @@ func TestReaderIntegration_UUIDReferencesWithNameMetadata(t *testing.T) {
 	}
 	pool := &Pool{Pool: rawPool}
 
-	if _, err := pool.Exec(ctx, readerIntegrationSchemaSQL); err != nil {
-		t.Fatalf("create test tables: %v", err)
-	}
+	applyAdapterMigrations(ctx, t, databaseURL, schemaName)
 
 	workspaceID := "11111111-1111-1111-1111-111111111111"
 	featureID := "22222222-2222-2222-2222-222222222222"
@@ -138,119 +143,63 @@ func TestReaderIntegration_UUIDReferencesWithNameMetadata(t *testing.T) {
 	}
 }
 
-const readerIntegrationSchemaSQL = `
-CREATE TABLE workspaces (
-	id uuid PRIMARY KEY,
-	slug text NOT NULL UNIQUE,
-	name text NOT NULL,
-	management_repo_id text NOT NULL,
-	branch_pattern text,
-	created_at timestamptz NOT NULL,
-	updated_at timestamptz NOT NULL
-);
+func applyAdapterMigrations(ctx context.Context, t *testing.T, databaseURL, schemaName string) {
+	t.Helper()
 
-CREATE TABLE workspace_repos (
-	id uuid PRIMARY KEY,
-	workspace_id uuid NOT NULL REFERENCES workspaces(id),
-	repo_id text NOT NULL,
-	base_branch text,
-	created_at timestamptz NOT NULL,
-	updated_at timestamptz NOT NULL
-);
+	cfg, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatalf("parse migration db config: %v", err)
+	}
+	if cfg.RuntimeParams == nil {
+		cfg.RuntimeParams = map[string]string{}
+	}
+	cfg.RuntimeParams["search_path"] = schemaName
 
-CREATE TABLE workspace_features (
-	id uuid PRIMARY KEY,
-	workspace_id uuid NOT NULL REFERENCES workspaces(id),
-	feature_id uuid NOT NULL,
-	feature_name text NOT NULL,
-	title text NOT NULL,
-	feature_status text,
-	current_stage text,
-	next_action text,
-	stages jsonb,
-	source_path text NOT NULL,
-	source_hash text,
-	created_at timestamptz NOT NULL,
-	updated_at timestamptz NOT NULL,
-	UNIQUE (workspace_id, feature_id)
-);
+	migrationDB := stdlib.OpenDB(*cfg)
+	migrationDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = migrationDB.Close() })
+	if err := migrationDB.PingContext(ctx); err != nil {
+		t.Fatalf("ping migration db: %v", err)
+	}
 
-CREATE TABLE workspace_feature_documents (
-	id uuid PRIMARY KEY,
-	workspace_id uuid NOT NULL REFERENCES workspaces(id),
-	feature_id uuid NOT NULL,
-	feature_name text NOT NULL,
-	document_type text NOT NULL,
-	source_path text NOT NULL,
-	url text,
-	created_at timestamptz NOT NULL,
-	updated_at timestamptz NOT NULL
-);
+	if err := runGooseUp(ctx, migrationDB, adapterMigrationsDir(t)); err != nil {
+		t.Fatalf("apply workspace-github-adapter migrations: %v", err)
+	}
+}
 
-CREATE TABLE workspace_tasks (
-	id uuid PRIMARY KEY,
-	workspace_id uuid NOT NULL REFERENCES workspaces(id),
-	feature_id uuid NOT NULL,
-	feature_name text NOT NULL,
-	task_id uuid NOT NULL,
-	task_name text NOT NULL,
-	title text NOT NULL,
-	repo text,
-	status text,
-	depends_on jsonb NOT NULL,
-	blocked_reason text,
-	branch text,
-	execution jsonb,
-	pr jsonb,
-	workspace_pr jsonb,
-	source_path text NOT NULL,
-	source_hash text,
-	created_at timestamptz NOT NULL,
-	updated_at timestamptz NOT NULL,
-	UNIQUE (workspace_id, feature_id, task_id)
-);
+func runGooseUp(ctx context.Context, db *sql.DB, migrationsDir string) error {
+	if err := goose.SetDialect("postgres"); err != nil {
+		return err
+	}
+	goose.SetBaseFS(os.DirFS(filepath.Dir(migrationsDir)))
+	return goose.UpContext(ctx, db, filepath.Base(migrationsDir))
+}
 
-CREATE TABLE workspace_activity_events (
-	id uuid PRIMARY KEY,
-	workspace_id uuid NOT NULL REFERENCES workspaces(id),
-	scope_type text NOT NULL,
-	feature_id uuid,
-	task_id uuid,
-	action text,
-	actor text,
-	occurred_at text,
-	note text,
-	sequence integer NOT NULL,
-	raw_event jsonb NOT NULL,
-	created_at timestamptz NOT NULL
-);
+func adapterMigrationsDir(t *testing.T) string {
+	t.Helper()
 
-CREATE TABLE workspace_github_sources (
-	id uuid PRIMARY KEY,
-	workspace_id uuid NOT NULL REFERENCES workspaces(id),
-	repo_url text NOT NULL,
-	repo_owner text NOT NULL,
-	repo_name text NOT NULL,
-	default_branch text,
-	created_at timestamptz NOT NULL,
-	updated_at timestamptz NOT NULL
-);
+	if dir := os.Getenv("WORKSPACE_GITHUB_ADAPTER_MIGRATIONS_DIR"); dir != "" {
+		return verifiedMigrationsDir(t, dir)
+	}
 
-CREATE TABLE workspace_sync_runs (
-	id uuid PRIMARY KEY,
-	workspace_id uuid NOT NULL REFERENCES workspaces(id),
-	trigger text NOT NULL,
-	branch text,
-	feature_id text,
-	task_id text,
-	mode text NOT NULL,
-	status text NOT NULL,
-	commit_sha text,
-	changed_paths jsonb,
-	started_at timestamptz NOT NULL,
-	finished_at timestamptz,
-	error_code text,
-	error_message text,
-	metadata jsonb
-);
-`
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve current test file")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+	dir := filepath.Join(repoRoot, "..", "workspace-github-adapter", "database", "migrations")
+	return verifiedMigrationsDir(t, dir)
+}
+
+func verifiedMigrationsDir(t *testing.T, dir string) string {
+	t.Helper()
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("workspace-github-adapter migrations dir %q is not available: %v", dir, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("workspace-github-adapter migrations path %q is not a directory", dir)
+	}
+	return dir
+}

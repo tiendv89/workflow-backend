@@ -67,7 +67,7 @@ This is a **greenfield schema** — no existing data needs to be migrated. The f
 
 `api-service` does not poll GitHub directly. Sync is triggered explicitly:
 
-- **Import**: `POST /api/workspaces/import` — asks `adapter-service` to accept the workspace import and enqueue reconciliation.
+- **Import**: `POST /api/workspaces/import` — asks `adapter-service` to import and persist the workspace, then returns the normalized workspace detail.
 - **Manual sync**: `POST /api/workspaces/:workspaceId/sync` — triggers a full reconciliation via `adapter-service`.
 - **Webhook-driven sync** (on `adapter-service`): GitHub webhook events on the management repo's branches trigger targeted syncs and task queue entries automatically.
 
@@ -92,7 +92,7 @@ All routes are served by `api-service` under the `/api` prefix.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/workspaces` | List all saved workspaces with source state. |
-| `POST` | `/api/workspaces/import` | Import a new workspace from a GitHub repo URL. Returns `202` with `{ "workspace_id": "...", "status": "accepted" }` after `adapter-service` accepts the queued reconciliation. |
+| `POST` | `/api/workspaces/import` | Import a new workspace from a GitHub repo URL. Returns `200` with normalized workspace detail after `adapter-service` persists the imported workspace data. |
 | `GET` | `/api/workspaces/:workspaceId` | Workspace detail: features and tasks. |
 | `GET` | `/api/workspaces/:workspaceId/search/features` | Search workspace features. Optional `?title=`, `?status=`, `?sort=`, and `?limit=` filters. |
 | `POST` | `/api/workspaces/:workspaceId/sync` | Trigger a manual full reconciliation. Returns the workspace detail (potentially stale on failure). |

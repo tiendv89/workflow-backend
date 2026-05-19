@@ -106,3 +106,56 @@ func TestImportWorkspace_MapsStatusWhenErrorBodyIsNotStructured(t *testing.T) {
 		t.Error("expected retryable=false")
 	}
 }
+
+func TestImportWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/workspaces/import" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"workspace_id": "11111111-1111-1111-1111-111111111111",
+			"status":       "accepted",
+		})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL)
+	_, err := client.ImportWorkspace(context.Background(), ImportRequest{RepoURL: "https://github.com/org/repo"})
+	if err == nil {
+		t.Fatal("expected error for async accepted-only import")
+	}
+
+	se, ok := err.(domain.SourceError)
+	if !ok {
+		t.Fatalf("expected SourceError, got %T", err)
+	}
+	if se.Code != domain.ErrAdapterInternal {
+		t.Errorf("expected %s, got %s", domain.ErrAdapterInternal, se.Code)
+	}
+}
+
+func TestSyncWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/workspaces/11111111-1111-1111-1111-111111111111/sync" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL)
+	err := client.SyncWorkspace(context.Background(), "11111111-1111-1111-1111-111111111111")
+	if err == nil {
+		t.Fatal("expected error for async accepted-only sync")
+	}
+
+	se, ok := err.(domain.SourceError)
+	if !ok {
+		t.Fatalf("expected SourceError, got %T", err)
+	}
+	if se.Code != domain.ErrAdapterInternal {
+		t.Errorf("expected %s, got %s", domain.ErrAdapterInternal, se.Code)
+	}
+}

@@ -187,6 +187,18 @@ func makeUUID(hex string) database.Workspace {
 	return ws
 }
 
+func makeSuccessfulSyncRun(workspaceID string) database.WorkspaceSyncRun {
+	var run database.WorkspaceSyncRun
+	_ = run.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	_ = run.WorkspaceID.Scan(workspaceID)
+	run.Trigger = "api_import"
+	run.Mode = "full"
+	run.Status = "success"
+	_ = run.StartedAt.Scan(time.Now().Add(-time.Second))
+	_ = run.FinishedAt.Scan(time.Now())
+	return run
+}
+
 const testWSID = "11111111-1111-1111-1111-111111111111"
 const testFeatureRowID = "33333333-3333-3333-3333-333333333333"
 const testTaskRowID = "44444444-4444-4444-4444-444444444444"
@@ -412,7 +424,13 @@ func TestImportWorkspace_AdapterError(t *testing.T) {
 
 func TestImportWorkspace_Success(t *testing.T) {
 	ws := makeUUID(testWSID)
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
+	src.WorkspaceID.Scan(testWSID)
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		syncRuns:   []database.WorkspaceSyncRun{makeSuccessfulSyncRun(testWSID)},
+		githubSrcs: map[string]database.WorkspaceGitHubSource{testWSID: src},
+	}
 	svc := newService(db, &fakeAdapter{importID: testWSID})
 
 	detail, se := svc.ImportWorkspace(context.Background(), domain.ImportInput{RepoURL: "https://github.com/org/repo"})
@@ -422,18 +440,21 @@ func TestImportWorkspace_Success(t *testing.T) {
 	if detail.ID != testWSID {
 		t.Errorf("expected workspace ID %s, got %s", testWSID, detail.ID)
 	}
+	if detail.RepoURL != "https://github.com/org/repo" {
+		t.Errorf("expected repo_url from persisted source, got %q", detail.RepoURL)
+	}
+	if detail.SourceState.Stale {
+		t.Error("expected fresh source_state after completed import")
+	}
 }
 
-func TestImportWorkspace_AcceptsQueuedImportWithoutCachedWorkspace(t *testing.T) {
+func TestImportWorkspace_ReturnsErrorWhenAdapterDoesNotPersistWorkspace(t *testing.T) {
 	db := &fakeDB{}
 	svc := newService(db, &fakeAdapter{importID: testWSID})
 
-	result, se := svc.ImportWorkspace(context.Background(), domain.ImportInput{RepoURL: "https://github.com/org/repo"})
-	if se != (domain.SourceError{}) {
-		t.Fatalf("unexpected error: %v", se)
-	}
-	if result.ID != testWSID {
-		t.Errorf("expected workspace ID %s, got %s", testWSID, result.ID)
+	_, se := svc.ImportWorkspace(context.Background(), domain.ImportInput{RepoURL: "https://github.com/org/repo"})
+	if se.Code != domain.ErrDatabaseNotFound {
+		t.Fatalf("expected DATABASE_NOT_FOUND when import did not persist workspace, got %+v", se)
 	}
 }
 

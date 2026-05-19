@@ -1,7 +1,0 @@
-{
-  "terminal_status": "change_requested",
-  "verdict": "change_requested",
-  "confidence": 0.93,
-  "notes": "🔴 Schema/API ID contract uses UUID feature/task IDs and feature_name/task_name instead of approved public text feature_id/task_id. 🔴 Import route is async 202 summary instead of returning normalized WorkspaceDetail after import. 🟡 T5 tests use FakeDB only and do not validate PostgreSQL migrations/queries.",
-  "review_url": "https://github.com/tiendv89/workflow-backend/pull/3#pullrequestreview-4317187412"
-}

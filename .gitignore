@@ -44,3 +44,4 @@ tmp/
 temp/
 .cache/
 .coverage/
+/result.json

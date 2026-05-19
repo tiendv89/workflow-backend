@@ -31,6 +31,7 @@ type fakeDB struct {
 	documents  []database.WorkspaceFeatureDocument
 	tasks      []database.WorkspaceTask
 	activity   []database.WorkspaceActivityEvent
+	githubSrcs map[string]database.WorkspaceGitHubSource
 }
 
 func (f *fakeDB) ListWorkspaces(_ context.Context) ([]database.Workspace, error) {
@@ -44,11 +45,20 @@ func (f *fakeDB) GetWorkspace(_ context.Context, workspaceID string) (database.W
 	}
 	return database.Workspace{}, database.ErrNotFound
 }
-func (f *fakeDB) GetGitHubSource(_ context.Context, _ string) (database.WorkspaceGitHubSource, error) {
+func (f *fakeDB) GetGitHubSource(_ context.Context, workspaceID string) (database.WorkspaceGitHubSource, error) {
+	if f.githubSrcs != nil {
+		if src, ok := f.githubSrcs[workspaceID]; ok {
+			return src, nil
+		}
+	}
 	return database.WorkspaceGitHubSource{}, database.ErrNotFound
 }
 func (f *fakeDB) ListGitHubSources(_ context.Context) ([]database.WorkspaceGitHubSource, error) {
-	return nil, nil
+	out := make([]database.WorkspaceGitHubSource, 0, len(f.githubSrcs))
+	for _, src := range f.githubSrcs {
+		out = append(out, src)
+	}
+	return out, nil
 }
 func (f *fakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database.WorkspaceSyncRun, error) {
 	return f.syncRuns, nil
@@ -144,6 +154,18 @@ func makeTestWorkspace(id string) database.Workspace {
 	return ws
 }
 
+func makeSuccessfulSyncRun(workspaceID string) database.WorkspaceSyncRun {
+	var run database.WorkspaceSyncRun
+	run.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	run.WorkspaceID.Scan(workspaceID)
+	run.Trigger = "api_import"
+	run.Mode = "full"
+	run.Status = "success"
+	run.StartedAt.Scan(time.Now().Add(-time.Second))
+	run.FinishedAt.Scan(time.Now())
+	return run
+}
+
 func newTestRouter(db service.DatabaseReader, adp service.AdapterCaller) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	svc := service.New(db, adp, 30*time.Minute)
@@ -224,8 +246,26 @@ func TestGetWorkspace_404(t *testing.T) {
 	}
 }
 
-func TestImportWorkspace_202(t *testing.T) {
-	db := &fakeDB{}
+func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	feat := database.WorkspaceFeature{
+		FeatureName: "workspace-data-backend",
+		Title:       "Workspace Data Backend",
+	}
+	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
+	feat.FeatureID.Scan(handlerTestFeatureRowID)
+	feat.WorkspaceID.Scan(handlerTestWSID)
+	feat.UpdatedAt.Scan(time.Now())
+	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
+	src.WorkspaceID.Scan(handlerTestWSID)
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		syncRuns:   []database.WorkspaceSyncRun{makeSuccessfulSyncRun(handlerTestWSID)},
+		features:   []database.WorkspaceFeature{feat},
+		githubSrcs: map[string]database.WorkspaceGitHubSource{
+			handlerTestWSID: src,
+		},
+	}
 	r := newTestRouter(db, &fakeAdapter{importID: handlerTestWSID})
 
 	body := `{"repo_url":"https://github.com/org/repo"}`
@@ -234,18 +274,25 @@ func TestImportWorkspace_202(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	var result struct {
-		WorkspaceID string `json:"workspace_id"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+	var detail domain.WorkspaceDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if result.WorkspaceID != handlerTestWSID {
-		t.Errorf("expected workspace_id %s, got %s", handlerTestWSID, result.WorkspaceID)
+	if detail.ID != handlerTestWSID {
+		t.Errorf("expected workspace ID %s, got %s", handlerTestWSID, detail.ID)
+	}
+	if detail.RepoURL != "https://github.com/org/repo" {
+		t.Errorf("expected repo_url from persisted source, got %q", detail.RepoURL)
+	}
+	if detail.SourceState.Stale {
+		t.Error("expected fresh source_state after completed import")
+	}
+	if len(detail.Features) != 1 {
+		t.Errorf("expected persisted feature summary, got %d features", len(detail.Features))
 	}
 }
 

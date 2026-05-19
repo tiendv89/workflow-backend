@@ -65,9 +65,7 @@ func (h *WorkspaceHandler) ImportWorkspace(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	// Import is asynchronous: adapter-service persists a placeholder and enqueues
-	// a Redis sync task for adapter-worker to process.
-	c.JSON(http.StatusAccepted, detail)
+	c.JSON(http.StatusOK, detail)
 }
 
 // GetWorkspace godoc
