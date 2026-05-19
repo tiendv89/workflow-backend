@@ -448,8 +448,18 @@ func (f *FakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string
 	return database.WorkspaceTask{}, database.ErrNotFound
 }
 
-func (f *FakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]database.WorkspaceActivityEvent, error) {
-	return f.Activity, nil
+func (f *FakeDB) ListActivityEvents(_ context.Context, _, featureID, taskID string) ([]database.WorkspaceActivityEvent, error) {
+	out := make([]database.WorkspaceActivityEvent, 0, len(f.Activity))
+	for _, event := range f.Activity {
+		if featureID != "" && database.UUIDString(event.FeatureID) != featureID {
+			continue
+		}
+		if taskID != "" && database.UUIDString(event.TaskID) != taskID {
+			continue
+		}
+		out = append(out, event)
+	}
+	return out, nil
 }
 
 // FakeAdapter is a configurable fake of the AdapterCaller interface.

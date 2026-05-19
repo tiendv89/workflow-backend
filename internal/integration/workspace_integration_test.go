@@ -636,6 +636,64 @@ func TestListActivity_WithFeatureFilter_200(t *testing.T) {
 	}
 }
 
+func TestListActivity_WithTaskOnlyFilter_ReturnsTaskEvents(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	taskEvent := testhelpers.NewActivityEvent(wsID, featureID, taskID, "done", "agent@example.com", "task note", 0)
+	featureEvent := testhelpers.NewActivityEvent(wsID, featureID, "", "approved", "reviewer@example.com", "feature note", 1)
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Activity:   []database.WorkspaceActivityEvent{taskEvent, featureEvent},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity?taskId="+taskRowID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with taskId filter, got %d", resp.StatusCode)
+	}
+	var events []domain.ActivityEvent
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 task activity event, got %d", len(events))
+	}
+	if events[0].TaskID != taskRowID {
+		t.Fatalf("expected task_id %s, got %s", taskRowID, events[0].TaskID)
+	}
+}
+
+func TestListActivity_WithFeatureAndTaskFilters_ReturnsMatchingTaskEvents(t *testing.T) {
+	ws := testhelpers.NewWorkspace(wsID, "W", "w")
+	taskEvent := testhelpers.NewActivityEvent(wsID, featureID, taskID, "done", "agent@example.com", "task note", 0)
+	featureEvent := testhelpers.NewActivityEvent(wsID, featureID, "", "approved", "reviewer@example.com", "feature note", 1)
+	db := &testhelpers.FakeDB{
+		Workspaces: []database.Workspace{ws},
+		Activity:   []database.WorkspaceActivityEvent{taskEvent, featureEvent},
+	}
+	srv := newServer(db, &testhelpers.FakeAdapter{})
+	defer srv.Close()
+
+	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity?featureId="+featureRowID+"&taskId="+taskRowID)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 with featureId and taskId filters, got %d", resp.StatusCode)
+	}
+	var events []domain.ActivityEvent
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		t.Fatalf("decode events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 filtered activity event, got %d", len(events))
+	}
+	if events[0].FeatureID != featureRowID || events[0].TaskID != taskRowID {
+		t.Fatalf("expected feature/task %s/%s, got %s/%s", featureRowID, taskRowID, events[0].FeatureID, events[0].TaskID)
+	}
+}
+
 func TestListActivity_WorkspaceNotFound_404(t *testing.T) {
 	db := &testhelpers.FakeDB{}
 	srv := newServer(db, &testhelpers.FakeAdapter{})

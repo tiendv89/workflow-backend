@@ -36,6 +36,28 @@ func TestActivityFilterClauseMatchesWorkflowNamesAndUUIDs(t *testing.T) {
 	}
 }
 
+func TestListActivityEventsUsesIndependentActivityFilterClause(t *testing.T) {
+	source, err := os.ReadFile("queries.go")
+	if err != nil {
+		t.Fatalf("read queries.go: %v", err)
+	}
+
+	body := string(source)
+	start := strings.Index(body, "func (r *Reader) ListActivityEvents")
+	if start < 0 {
+		t.Fatal("ListActivityEvents not found")
+	}
+	end := strings.Index(body[start:], "// UUIDString converts")
+	if end < 0 {
+		t.Fatal("ListActivityEvents end marker not found")
+	}
+	listActivityEvents := body[start : start+end]
+
+	if !strings.Contains(listActivityEvents, "activityFilterClause(featureID, taskID, 2)") {
+		t.Fatalf("ListActivityEvents must build feature and task filters independently with activityFilterClause")
+	}
+}
+
 func TestTaskIDOrderAscUsesNumericWorkflowOrder(t *testing.T) {
 	clause := taskIDOrderAsc("t")
 

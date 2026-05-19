@@ -527,31 +527,13 @@ func (r *Reader) ListActivityEvents(ctx context.Context, workspaceID, featureID,
 	if err != nil {
 		return nil, err
 	}
-	var where []string
 	args := []interface{}{uid}
-	argPos := 2
-	if featureID != "" {
-		fid, err := r.resolveFeatureID(ctx, uid, featureID)
-		if err != nil {
-			return nil, err
-		}
-		where = append(where, fmt.Sprintf("feature_id = $%d", argPos))
-		args = append(args, fid)
-		argPos++
-		if taskID != "" {
-			tid, err := r.resolveTaskID(ctx, uid, fid, taskID)
-			if err != nil {
-				return nil, err
-			}
-			where = append(where, fmt.Sprintf("task_id = $%d", argPos))
-			args = append(args, tid)
-			argPos++
-		}
+	filterClause, filterArgs, _, err := activityFilterClause(featureID, taskID, 2)
+	if err != nil {
+		return nil, err
 	}
-	filterClause := ""
-	if len(where) > 0 {
-		filterClause = " AND " + strings.Join(where, " AND ")
-	}
+	args = append(args, filterArgs...)
+
 	q := fmt.Sprintf(`
 		SELECT id, workspace_id, scope_type, feature_id, task_id, action, actor,
 		       occurred_at, note, sequence, raw_event, created_at
