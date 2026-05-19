@@ -581,9 +581,8 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 		}
 	}
 
-	prRefs := parsePRRefs(t.Pr, t.WorkspacePr, t.FeatureName)
-
 	summary := toTaskSummary(t)
+	prRefs := parsePRRefs(t.Pr, t.WorkspacePr, summary.Repo)
 	return &domain.TaskDetail{
 		ID:            summary.ID,
 		TaskID:        summary.TaskID,
@@ -791,7 +790,7 @@ func countTasks(tasks []database.WorkspaceTask) domain.TaskCounts {
 	return counts
 }
 
-func parsePRRefs(prData, workspacePRData []byte, featureID string) []domain.PullRequestRef {
+func parsePRRefs(prData, workspacePRData []byte, repo string) []domain.PullRequestRef {
 	var refs []domain.PullRequestRef
 
 	var pr map[string]interface{}
@@ -803,7 +802,7 @@ func parsePRRefs(prData, workspacePRData []byte, featureID string) []domain.Pull
 					Label:  "Implementation PR",
 					URL:    url,
 					Status: status,
-					Repo:   featureID,
+					Repo:   repo,
 				})
 			}
 		}

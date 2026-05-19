@@ -43,6 +43,7 @@ func DeriveSourceState(latestRun *SyncRun, staleThreshold time.Duration) SourceS
 			Stale:        true,
 			LastSyncedAt: latestRun.FinishedAt,
 			ErrorCode:    latestRun.ErrorCode,
+			ErrorMessage: latestRun.ErrorMsg,
 		}
 	case SyncStatusSuccess, SyncStatusPartial:
 		if latestRun.FinishedAt == nil {

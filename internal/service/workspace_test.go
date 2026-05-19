@@ -468,6 +468,35 @@ func TestGetWorkspace_Success(t *testing.T) {
 	}
 }
 
+func TestGetWorkspace_FailedSyncIncludesUserFacingErrorMessage(t *testing.T) {
+	ws := makeUUID(testWSID)
+	errCode := "GITHUB_RATE_LIMIT"
+	errMsg := "GitHub API rate limit reached. Try again later."
+	run := makeSuccessfulSyncRun(testWSID)
+	run.Status = "failed"
+	run.ErrorCode = &errCode
+	run.ErrorMessage = &errMsg
+	db := &fakeDB{
+		workspaces: []database.Workspace{ws},
+		syncRuns:   []database.WorkspaceSyncRun{run},
+	}
+	svc := newService(db, &fakeAdapter{})
+
+	detail, se := svc.GetWorkspace(context.Background(), testWSID)
+	if se != (domain.SourceError{}) {
+		t.Fatalf("unexpected error: %v", se)
+	}
+	if !detail.SourceState.Stale {
+		t.Fatal("expected failed sync run to mark source_state stale")
+	}
+	if detail.SourceState.ErrorCode != errCode {
+		t.Fatalf("expected error_code %q, got %q", errCode, detail.SourceState.ErrorCode)
+	}
+	if detail.SourceState.ErrorMessage != errMsg {
+		t.Fatalf("expected error_message %q, got %q", errMsg, detail.SourceState.ErrorMessage)
+	}
+}
+
 func TestGetWorkspace_TaskCountsUsePublicFeatureID(t *testing.T) {
 	ws := makeUUID(testWSID)
 	feat := database.WorkspaceFeature{
@@ -724,6 +753,7 @@ func TestGetTask_Success(t *testing.T) {
 	blocked := false
 	_ = blocked
 	taskStatus := &status
+	repo := "workflow-backend"
 	feat := database.WorkspaceFeature{
 		FeatureName: "feature-1",
 		Title:       "Feature One",
@@ -737,8 +767,10 @@ func TestGetTask_Success(t *testing.T) {
 		TaskName:    "T1",
 		Title:       "My Task",
 		Status:      taskStatus,
+		Repo:        &repo,
 		DependsOn:   []byte(`["T0"]`),
 		Execution:   []byte(`{"actor_type":"agent"}`),
+		Pr:          []byte(`{"url":"https://github.com/tiendv89/workflow-backend/pull/3","status":"open"}`),
 	}
 	task.ID.Scan("88888888-8888-8888-8888-888888888888")
 	task.TaskID.Scan(testTaskRowID)
@@ -768,6 +800,12 @@ func TestGetTask_Success(t *testing.T) {
 	}
 	if len(detail.DependsOn) != 1 || detail.DependsOn[0] != "T0" {
 		t.Errorf("expected depends_on [T0], got %v", detail.DependsOn)
+	}
+	if len(detail.PRRefs) != 1 {
+		t.Fatalf("expected one PR ref, got %d", len(detail.PRRefs))
+	}
+	if detail.PRRefs[0].Repo != "workflow-backend" {
+		t.Fatalf("expected PR ref repo workflow-backend, got %q", detail.PRRefs[0].Repo)
 	}
 }
 
