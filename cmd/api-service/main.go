@@ -72,9 +72,9 @@ func main() {
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
 		Handler:      r,
-		ReadTimeout:  400 * time.Second,
-		WriteTimeout: 400 * time.Second,
-		IdleTimeout:  400 * time.Second,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	done := make(chan os.Signal, 1)

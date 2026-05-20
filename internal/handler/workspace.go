@@ -188,19 +188,6 @@ func (h *WorkspaceHandler) GetFeature(c *gin.Context) {
 	respondOK(c, detail)
 }
 
-// ListFeatureTasks godoc
-// GET /api/workspaces/:workspaceId/features/:featureId/tasks
-func (h *WorkspaceHandler) ListFeatureTasks(c *gin.Context) {
-	workspaceID := c.Param("workspaceId")
-	featureID := c.Param("featureId")
-	tasks, se := h.svc.ListFeatureTasks(c.Request.Context(), workspaceID, featureID)
-	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
-		return
-	}
-	respondOK(c, tasks)
-}
-
 // GetTask godoc
 // GET /api/workspaces/:workspaceId/features/:featureId/tasks/:taskId
 func (h *WorkspaceHandler) GetTask(c *gin.Context) {
