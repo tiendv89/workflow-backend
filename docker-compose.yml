@@ -1,0 +1,18 @@
+services:
+  api-service:
+    build: .
+    environment:
+      PORT: 8081
+      DATABASE_URL: postgres://workspace_adapter:workspace_adapter@postgres:5432/workspace_adapter?sslmode=disable
+      ADAPTER_SERVICE_URL: http://adapter-service:8080
+      STALE_THRESHOLD_MINUTES: ${STALE_THRESHOLD_MINUTES:-30}
+    ports:
+      - "8081:8081"
+    networks:
+      - workspace-github-adapter
+    restart: unless-stopped
+
+networks:
+  workspace-github-adapter:
+    external: true
+    name: workspace-github-adapter_default
