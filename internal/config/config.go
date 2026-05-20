@@ -38,6 +38,9 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid STALE_THRESHOLD_MINUTES: %w", err)
 		}
+		if m < 0 {
+			return nil, fmt.Errorf("invalid STALE_THRESHOLD_MINUTES: must be >= 0")
+		}
 		staleThreshold = time.Duration(m) * time.Minute
 	}
 

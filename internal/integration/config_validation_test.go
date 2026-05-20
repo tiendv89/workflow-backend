@@ -79,3 +79,14 @@ func TestConfig_CustomStaleThreshold(t *testing.T) {
 		t.Errorf("expected stale threshold 60m, got %v", cfg.StaleThreshold)
 	}
 }
+
+// TestConfig_InvalidStaleThreshold rejects negative values.
+func TestConfig_InvalidStaleThreshold(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/test")
+	t.Setenv("STALE_THRESHOLD_MINUTES", "-1")
+
+	_, err := config.Load()
+	if err == nil {
+		t.Fatal("expected error for negative STALE_THRESHOLD_MINUTES value")
+	}
+}
