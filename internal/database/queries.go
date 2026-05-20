@@ -217,28 +217,7 @@ func (r *Reader) SearchWorkspaceFeatures(ctx context.Context, workspaceID string
 		return nil, err
 	}
 
-	where := []string{"workspace_id = $1"}
-	args := []interface{}{uid}
-	argPos := 2
-	if filters.Title != "" {
-		where = append(where, fmt.Sprintf("title ILIKE $%d", argPos))
-		args = append(args, "%"+filters.Title+"%")
-		argPos++
-	}
-	if filters.Status != "" {
-		statuses := splitCSV(filters.Status)
-		if len(statuses) == 1 {
-			where = append(where, fmt.Sprintf("feature_status = $%d", argPos))
-			args = append(args, statuses[0])
-			argPos++
-		} else {
-			if len(statuses) > 1 {
-				where = append(where, fmt.Sprintf("feature_status = ANY($%d)", argPos))
-				args = append(args, statuses)
-				argPos++
-			}
-		}
-	}
+	where, args, argPos := buildFeatureWhere(uid, filters)
 
 	orderBy := "updated_at DESC, feature_name ASC"
 	switch filters.Sort {
@@ -348,9 +327,9 @@ func (r *Reader) GetWorkspaceFeature(ctx context.Context, workspaceID, featureID
 	if err != nil {
 		return WorkspaceFeature{}, err
 	}
-	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	fid, err := parseUUID(strings.TrimSpace(featureID))
 	if err != nil {
-		return WorkspaceFeature{}, err
+		return WorkspaceFeature{}, ErrNotFound
 	}
 	const q = `
 		SELECT id, workspace_id, feature_id, feature_name, title, feature_status, current_stage, next_action,
@@ -377,9 +356,9 @@ func (r *Reader) ListFeatureDocuments(ctx context.Context, workspaceID, featureI
 	if err != nil {
 		return nil, err
 	}
-	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	fid, err := parseUUID(strings.TrimSpace(featureID))
 	if err != nil {
-		return nil, err
+		return nil, ErrNotFound
 	}
 	const q = `
 		SELECT id, workspace_id, feature_id, feature_name, document_type, source_path, url, created_at, updated_at
@@ -408,12 +387,10 @@ func (r *Reader) SearchFeatureTasks(ctx context.Context, workspaceID, featureID 
 	if err != nil {
 		return nil, err
 	}
-
-	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	fid, err := parseUUID(strings.TrimSpace(featureID))
 	if err != nil {
-		return nil, err
+		return nil, ErrNotFound
 	}
-
 	return r.searchTasks(ctx, []string{"t.workspace_id = $1", "t.feature_id = $2"}, []interface{}{uid, fid}, 3, filters)
 }
 
@@ -433,9 +410,9 @@ func (r *Reader) ListFeatureTasks(ctx context.Context, workspaceID, featureID st
 	if err != nil {
 		return nil, err
 	}
-	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	fid, err := parseUUID(strings.TrimSpace(featureID))
 	if err != nil {
-		return nil, err
+		return nil, ErrNotFound
 	}
 	q := fmt.Sprintf(`
 		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
@@ -496,13 +473,13 @@ func (r *Reader) GetWorkspaceTask(ctx context.Context, workspaceID, featureID, t
 	if err != nil {
 		return WorkspaceTask{}, err
 	}
-	fid, err := r.resolveFeatureID(ctx, uid, featureID)
+	fid, err := parseUUID(strings.TrimSpace(featureID))
 	if err != nil {
-		return WorkspaceTask{}, err
+		return WorkspaceTask{}, ErrNotFound
 	}
-	tid, err := r.resolveTaskID(ctx, uid, fid, taskID)
+	tid, err := parseUUID(strings.TrimSpace(taskID))
 	if err != nil {
-		return WorkspaceTask{}, err
+		return WorkspaceTask{}, ErrNotFound
 	}
 	const q = `
 		SELECT t.id, t.workspace_id, t.feature_id, t.feature_name, t.task_id, t.task_name, t.title,
@@ -613,38 +590,114 @@ func parseUUID(s string) (pgtype.UUID, error) {
 	return uid, nil
 }
 
-func (r *Reader) resolveFeatureID(ctx context.Context, workspaceID pgtype.UUID, featureIdentifier string) (pgtype.UUID, error) {
-	fid, err := parseUUID(strings.TrimSpace(featureIdentifier))
-	if err != nil {
-		return pgtype.UUID{}, ErrNotFound
+// buildFeatureWhere constructs the WHERE clause conditions for feature search/count queries.
+func buildFeatureWhere(workspaceUID pgtype.UUID, filters FeatureSearchFilters) ([]string, []interface{}, int) {
+	where := []string{"workspace_id = $1"}
+	args := []interface{}{workspaceUID}
+	argPos := 2
+	if filters.Title != "" {
+		where = append(where, fmt.Sprintf("title ILIKE $%d", argPos))
+		args = append(args, "%"+filters.Title+"%")
+		argPos++
 	}
-
-	const q = `SELECT feature_id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2`
-	var id pgtype.UUID
-	if err := r.db.QueryRow(ctx, q, workspaceID, fid).Scan(&id); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return pgtype.UUID{}, ErrNotFound
+	if filters.Status != "" {
+		statuses := splitCSV(filters.Status)
+		if len(statuses) == 1 {
+			where = append(where, fmt.Sprintf("feature_status = $%d", argPos))
+			args = append(args, statuses[0])
+			argPos++
+		} else if len(statuses) > 1 {
+			where = append(where, fmt.Sprintf("feature_status = ANY($%d)", argPos))
+			args = append(args, statuses)
+			argPos++
 		}
-		return pgtype.UUID{}, err
 	}
-	return id, nil
+	return where, args, argPos
 }
 
-func (r *Reader) resolveTaskID(ctx context.Context, workspaceID, featureID pgtype.UUID, taskIdentifier string) (pgtype.UUID, error) {
-	tid, err := parseUUID(strings.TrimSpace(taskIdentifier))
-	if err != nil {
-		return pgtype.UUID{}, ErrNotFound
+// buildTaskWhere constructs the WHERE clause conditions for task search/count queries.
+func buildTaskWhere(baseWhere []string, baseArgs []interface{}, argPos int, filters TaskSearchFilters) ([]string, []interface{}, int) {
+	where := make([]string, len(baseWhere), len(baseWhere)+4)
+	copy(where, baseWhere)
+	args := make([]interface{}, len(baseArgs), len(baseArgs)+4)
+	copy(args, baseArgs)
+	if filters.TaskID != "" {
+		where = append(where, fmt.Sprintf("t.task_name ILIKE $%d", argPos))
+		args = append(args, "%"+filters.TaskID+"%")
+		argPos++
 	}
-
-	const q = `SELECT task_id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3`
-	var id pgtype.UUID
-	if err := r.db.QueryRow(ctx, q, workspaceID, featureID, tid).Scan(&id); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return pgtype.UUID{}, ErrNotFound
+	if filters.Title != "" {
+		where = append(where, fmt.Sprintf("t.title ILIKE $%d", argPos))
+		args = append(args, "%"+filters.Title+"%")
+		argPos++
+	}
+	if filters.Status != "" {
+		statuses := splitCSV(filters.Status)
+		if len(statuses) == 1 {
+			where = append(where, fmt.Sprintf("t.status = $%d", argPos))
+			args = append(args, statuses[0])
+			argPos++
+		} else if len(statuses) > 1 {
+			where = append(where, fmt.Sprintf("t.status = ANY($%d)", argPos))
+			args = append(args, statuses)
+			argPos++
 		}
-		return pgtype.UUID{}, err
 	}
-	return id, nil
+	if filters.Repo != "" {
+		where = append(where, fmt.Sprintf("t.repo = $%d", argPos))
+		args = append(args, filters.Repo)
+		argPos++
+	}
+	return where, args, argPos
+}
+
+// CountWorkspaceFeatures returns the total number of features matching the filters (ignores Page/Limit).
+func (r *Reader) CountWorkspaceFeatures(ctx context.Context, workspaceID string, filters FeatureSearchFilters) (int, error) {
+	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	where, args, _ := buildFeatureWhere(uid, filters)
+	q := fmt.Sprintf(`SELECT COUNT(*) FROM workspace_features WHERE %s`, strings.Join(where, " AND "))
+	var count int
+	if err := r.db.QueryRow(ctx, q, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CountWorkspaceTasks returns the total number of tasks in a workspace matching the filters.
+func (r *Reader) CountWorkspaceTasks(ctx context.Context, workspaceID string, filters TaskSearchFilters) (int, error) {
+	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	where, args, _ := buildTaskWhere([]string{"t.workspace_id = $1"}, []interface{}{uid}, 2, filters)
+	q := fmt.Sprintf(`SELECT COUNT(*) FROM workspace_tasks t WHERE %s`, strings.Join(where, " AND "))
+	var count int
+	if err := r.db.QueryRow(ctx, q, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CountFeatureTasks returns the total number of tasks in a feature matching the filters.
+func (r *Reader) CountFeatureTasks(ctx context.Context, workspaceID, featureID string, filters TaskSearchFilters) (int, error) {
+	uid, err := parseUUID(workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	fid, err := parseUUID(strings.TrimSpace(featureID))
+	if err != nil {
+		return 0, ErrNotFound
+	}
+	where, args, _ := buildTaskWhere([]string{"t.workspace_id = $1", "t.feature_id = $2"}, []interface{}{uid, fid}, 3, filters)
+	q := fmt.Sprintf(`SELECT COUNT(*) FROM workspace_tasks t WHERE %s`, strings.Join(where, " AND "))
+	var count int
+	if err := r.db.QueryRow(ctx, q, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func taskIDOrderAsc(alias string) string {
@@ -688,34 +741,8 @@ func activityFilterClause(featureID, taskID string, firstArg int) (string, []int
 	return " AND " + strings.Join(where, " AND "), args, argPos, nil
 }
 
-func (r *Reader) searchTasks(ctx context.Context, where []string, args []interface{}, argPos int, filters TaskSearchFilters) ([]WorkspaceTask, error) {
-	if filters.TaskID != "" {
-		where = append(where, fmt.Sprintf("t.task_name ILIKE $%d", argPos))
-		args = append(args, "%"+filters.TaskID+"%")
-		argPos++
-	}
-	if filters.Title != "" {
-		where = append(where, fmt.Sprintf("t.title ILIKE $%d", argPos))
-		args = append(args, "%"+filters.Title+"%")
-		argPos++
-	}
-	if filters.Status != "" {
-		statuses := splitCSV(filters.Status)
-		if len(statuses) == 1 {
-			where = append(where, fmt.Sprintf("t.status = $%d", argPos))
-			args = append(args, statuses[0])
-			argPos++
-		} else if len(statuses) > 1 {
-			where = append(where, fmt.Sprintf("t.status = ANY($%d)", argPos))
-			args = append(args, statuses)
-			argPos++
-		}
-	}
-	if filters.Repo != "" {
-		where = append(where, fmt.Sprintf("t.repo = $%d", argPos))
-		args = append(args, filters.Repo)
-		argPos++
-	}
+func (r *Reader) searchTasks(ctx context.Context, baseWhere []string, baseArgs []interface{}, argPos int, filters TaskSearchFilters) ([]WorkspaceTask, error) {
+	where, args, argPos := buildTaskWhere(baseWhere, baseArgs, argPos, filters)
 
 	orderBy := taskIDOrderAsc("t")
 	switch filters.Sort {

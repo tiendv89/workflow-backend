@@ -200,6 +200,24 @@ func (f *fakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]databa
 	return f.activity, nil
 }
 
+func (f *fakeDB) CountWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) (int, error) {
+	return len(f.features), nil
+}
+
+func (f *fakeDB) CountFeatureTasks(_ context.Context, _, featureID string, _ database.TaskSearchFilters) (int, error) {
+	count := 0
+	for _, t := range f.tasks {
+		if database.UUIDString(t.FeatureID) == featureID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (f *fakeDB) CountWorkspaceTasks(_ context.Context, _ string, _ database.TaskSearchFilters) (int, error) {
+	return len(f.tasks), nil
+}
+
 type fakeAdapter struct {
 	importID  string
 	importErr error
@@ -608,9 +626,9 @@ func TestListFeatureTasks_200(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	tasks := decodeAPIData[[]domain.TaskSummary](t, w.Body.Bytes())
-	if len(tasks) != 1 {
-		t.Errorf("expected 1 task, got %d", len(tasks))
+	paged := decodeAPIData[domain.PagedTasks](t, w.Body.Bytes())
+	if len(paged.Items) != 1 {
+		t.Errorf("expected 1 task, got %d", len(paged.Items))
 	}
 }
 

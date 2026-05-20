@@ -604,6 +604,24 @@ func (f *FakeDB) ListActivityEvents(_ context.Context, _, featureID, taskID stri
 	return out, nil
 }
 
+func (f *FakeDB) CountWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) (int, error) {
+	return len(f.Features), nil
+}
+
+func (f *FakeDB) CountFeatureTasks(_ context.Context, _, featureID string, _ database.TaskSearchFilters) (int, error) {
+	count := 0
+	for _, t := range f.Tasks {
+		if database.UUIDString(t.FeatureID) == featureID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (f *FakeDB) CountWorkspaceTasks(_ context.Context, _ string, _ database.TaskSearchFilters) (int, error) {
+	return len(f.Tasks), nil
+}
+
 // FakeAdapter is a configurable fake of the AdapterCaller interface.
 type FakeAdapter struct {
 	ImportedWorkspaceID string

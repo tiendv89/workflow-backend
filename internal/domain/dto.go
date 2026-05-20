@@ -161,6 +161,22 @@ type TaskDetail struct {
 	Activity      []ActivityEvent  `json:"activity"`
 }
 
+// PagedFeatures is a paginated list of feature summaries.
+type PagedFeatures struct {
+	Items []FeatureSummary `json:"items"`
+	Total int              `json:"total"`
+	Page  int              `json:"page"`
+	Limit int              `json:"limit"`
+}
+
+// PagedTasks is a paginated list of task summaries.
+type PagedTasks struct {
+	Items []TaskSummary `json:"items"`
+	Total int           `json:"total"`
+	Page  int           `json:"page"`
+	Limit int           `json:"limit"`
+}
+
 // ImportInput is the request body for workspace import.
 type ImportInput struct {
 	RepoURL       string `json:"repo_url" binding:"required"`

@@ -262,6 +262,24 @@ func (f *fakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]databa
 	return f.activity, nil
 }
 
+func (f *fakeDB) CountWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) (int, error) {
+	return len(f.features), nil
+}
+
+func (f *fakeDB) CountFeatureTasks(_ context.Context, _, featureID string, _ database.TaskSearchFilters) (int, error) {
+	count := 0
+	for _, t := range f.tasks {
+		if database.UUIDString(t.FeatureID) == featureID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (f *fakeDB) CountWorkspaceTasks(_ context.Context, _ string, _ database.TaskSearchFilters) (int, error) {
+	return len(f.tasks), nil
+}
+
 type fakeAdapter struct {
 	importID  string
 	importErr error
@@ -698,11 +716,11 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	}
 	svc := newService(db, &fakeAdapter{})
 
-	tasks, se := svc.SearchTasks(context.Background(), testWSID, testFeatureRowID, domain.TaskSearchQuery{Sort: "task_id_asc"})
+	paged, se := svc.SearchTasks(context.Background(), testWSID, testFeatureRowID, domain.TaskSearchQuery{Sort: "task_id_asc"})
 	if se != (domain.SourceError{}) {
 		t.Fatalf("unexpected error: %v", se)
 	}
-	got := []string{tasks[0].TaskName, tasks[1].TaskName, tasks[2].TaskName}
+	got := []string{paged.Items[0].TaskName, paged.Items[1].TaskName, paged.Items[2].TaskName}
 	want := []string{"T1", "T2", "T10"}
 	for i := range want {
 		if got[i] != want[i] {
@@ -741,7 +759,7 @@ func TestSearchWorkspaceTasks_UsesQueryLayerAndPaginates(t *testing.T) {
 	}
 	svc := newService(db, &fakeAdapter{})
 
-	tasks, se := svc.SearchWorkspaceTasks(context.Background(), testWSID, domain.TaskSearchQuery{Sort: "task_id_asc", Page: 1, Limit: 2})
+	paged, se := svc.SearchWorkspaceTasks(context.Background(), testWSID, domain.TaskSearchQuery{Sort: "task_id_asc", Page: 1, Limit: 2})
 	if se != (domain.SourceError{}) {
 		t.Fatalf("unexpected error: %v", se)
 	}
@@ -751,7 +769,7 @@ func TestSearchWorkspaceTasks_UsesQueryLayerAndPaginates(t *testing.T) {
 	if db.listWorkspaceTasksCalls != 0 {
 		t.Fatalf("expected list workspace tasks to stay unused, got %d calls", db.listWorkspaceTasksCalls)
 	}
-	got := []string{tasks[0].TaskName, tasks[1].TaskName}
+	got := []string{paged.Items[0].TaskName, paged.Items[1].TaskName}
 	want := []string{"T1", "T2"}
 	for i := range want {
 		if got[i] != want[i] {

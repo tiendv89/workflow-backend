@@ -85,7 +85,7 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 		return
 	}
 
-	features, se := h.svc.SearchFeatures(c.Request.Context(), workspaceID, domain.FeatureSearchQuery{
+	paged, se := h.svc.SearchFeatures(c.Request.Context(), workspaceID, domain.FeatureSearchQuery{
 		Title:  c.Query("title"),
 		Status: c.Query("status"),
 		Sort:   c.Query("sort"),
@@ -96,7 +96,7 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	respondOK(c, features)
+	respondOK(c, paged)
 }
 
 // SearchTasks godoc
@@ -109,7 +109,7 @@ func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
 		return
 	}
 
-	tasks, se := h.svc.SearchTasks(c.Request.Context(), workspaceID, featureID, domain.TaskSearchQuery{
+	paged, se := h.svc.SearchTasks(c.Request.Context(), workspaceID, featureID, domain.TaskSearchQuery{
 		TaskID: c.Query("task_id"),
 		Title:  c.Query("title"),
 		Status: c.Query("status"),
@@ -122,7 +122,7 @@ func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	respondOK(c, tasks)
+	respondOK(c, paged)
 }
 
 // SearchWorkspaceTasks godoc
@@ -134,7 +134,7 @@ func (h *WorkspaceHandler) SearchWorkspaceTasks(c *gin.Context) {
 		return
 	}
 
-	tasks, se := h.svc.SearchWorkspaceTasks(c.Request.Context(), workspaceID, domain.TaskSearchQuery{
+	paged, se := h.svc.SearchWorkspaceTasks(c.Request.Context(), workspaceID, domain.TaskSearchQuery{
 		TaskID: c.Query("task_id"),
 		Title:  c.Query("title"),
 		Status: c.Query("status"),
@@ -147,7 +147,7 @@ func (h *WorkspaceHandler) SearchWorkspaceTasks(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	respondOK(c, tasks)
+	respondOK(c, paged)
 }
 
 // GetWorkspaceTask godoc

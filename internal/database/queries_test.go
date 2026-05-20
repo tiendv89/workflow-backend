@@ -76,13 +76,15 @@ func TestTaskIDOrderAscUsesNumericWorkflowOrder(t *testing.T) {
 }
 
 func TestQueryLayerDoesNotResolveReferencesByNames(t *testing.T) {
+	// UUID validation is implicit: invalid UUIDs return ErrNotFound directly via parseUUID;
+	// missing rows return ErrNotFound via pgx.ErrNoRows in the main query.
+	// The query layer must never resolve by mutable name columns.
 	forbidden := []string{
 		"WHERE workspace_id = $1 AND feature_name = $2",
 		"WHERE workspace_id = $1 AND feature_id = $2 AND task_name = $3",
 		"SELECT id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2",
 		"SELECT id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3",
-	}
-	required := []string{
+		// ensure the old existence-check round-trips are gone
 		"SELECT feature_id FROM workspace_features WHERE workspace_id = $1 AND feature_id = $2",
 		"SELECT task_id FROM workspace_tasks WHERE workspace_id = $1 AND feature_id = $2 AND task_id = $3",
 	}
@@ -91,11 +93,6 @@ func TestQueryLayerDoesNotResolveReferencesByNames(t *testing.T) {
 	for _, fragment := range forbidden {
 		if strings.Contains(source, fragment) {
 			t.Fatalf("query layer must resolve references by public UUID columns only; found %q", fragment)
-		}
-	}
-	for _, fragment := range required {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("query layer must resolve public UUID references; missing %q", fragment)
 		}
 	}
 }

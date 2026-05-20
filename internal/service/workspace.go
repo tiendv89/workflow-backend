@@ -23,12 +23,15 @@ type DatabaseReader interface {
 	GetLatestSyncRun(ctx context.Context, workspaceID string) (database.WorkspaceSyncRun, error)
 	ListWorkspaceFeatures(ctx context.Context, workspaceID string) ([]database.WorkspaceFeature, error)
 	SearchWorkspaceFeatures(ctx context.Context, workspaceID string, filters database.FeatureSearchFilters) ([]database.WorkspaceFeature, error)
+	CountWorkspaceFeatures(ctx context.Context, workspaceID string, filters database.FeatureSearchFilters) (int, error)
 	ListFeatureTaskCounts(ctx context.Context, workspaceID string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error)
 	GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (database.WorkspaceFeature, error)
 	ListFeatureDocuments(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceFeatureDocument, error)
 	ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceTask, error)
 	SearchFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
+	CountFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database.TaskSearchFilters) (int, error)
 	SearchWorkspaceTasks(ctx context.Context, workspaceID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
+	CountWorkspaceTasks(ctx context.Context, workspaceID string, filters database.TaskSearchFilters) (int, error)
 	ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]database.WorkspaceTask, error)
 	GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (database.WorkspaceTask, error)
 	GetWorkspaceTaskByID(ctx context.Context, workspaceID, taskID string) (database.WorkspaceTask, error)
@@ -241,6 +244,7 @@ func (s *WorkspaceService) SyncWorkspace(ctx context.Context, workspaceID string
 		detail.SourceState.Stale = true
 		if se, ok := err.(domain.SourceError); ok {
 			detail.SourceState.ErrorCode = string(se.Code)
+			detail.SourceState.ErrorMessage = se.Message
 		}
 		return detail, domain.SourceError{}
 	}
@@ -364,8 +368,8 @@ func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, fe
 	return out, domain.SourceError{}
 }
 
-// SearchTasks returns task summaries for a feature filtered by search/task_id/title/status/repo.
-func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, featureID string, query domain.TaskSearchQuery) ([]domain.TaskSummary, domain.SourceError) {
+// SearchTasks returns paged task summaries for a feature filtered by search/task_id/title/status/repo.
+func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, featureID string, query domain.TaskSearchQuery) (*domain.PagedTasks, domain.SourceError) {
 	if query.Page == 0 {
 		query.Page = 1
 	}
@@ -395,6 +399,7 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
+	featureUUID := database.UUIDString(feat.FeatureID)
 
 	filters := database.TaskSearchFilters{
 		TaskID: query.TaskID,
@@ -405,20 +410,24 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 		Page:   query.Page,
 		Limit:  query.Limit,
 	}
-	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, database.UUIDString(feat.FeatureID), filters)
+	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, featureUUID, filters)
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+	total, err := s.db.CountFeatureTasks(ctx, wsID, featureUUID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	out := make([]domain.TaskSummary, 0, len(tasks))
+	items := make([]domain.TaskSummary, 0, len(tasks))
 	for _, t := range tasks {
-		out = append(out, toTaskSummary(t))
+		items = append(items, toTaskSummary(t))
 	}
-	return out, domain.SourceError{}
+	return &domain.PagedTasks{Items: items, Total: total, Page: query.Page, Limit: query.Limit}, domain.SourceError{}
 }
 
-// SearchWorkspaceTasks returns task summaries for a workspace filtered by search/task_id/title/status/repo.
-func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID string, query domain.TaskSearchQuery) ([]domain.TaskSummary, domain.SourceError) {
+// SearchWorkspaceTasks returns paged task summaries for a workspace filtered by search/task_id/title/status/repo.
+func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID string, query domain.TaskSearchQuery) (*domain.PagedTasks, domain.SourceError) {
 	if query.Page == 0 {
 		query.Page = 1
 	}
@@ -441,7 +450,7 @@ func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID
 	}
 	wsID := database.UUIDString(ws.ID)
 
-	tasks, err := s.db.SearchWorkspaceTasks(ctx, wsID, database.TaskSearchFilters{
+	filters := database.TaskSearchFilters{
 		TaskID: query.TaskID,
 		Title:  query.Title,
 		Status: query.Status,
@@ -449,20 +458,25 @@ func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID
 		Sort:   query.Sort,
 		Page:   query.Page,
 		Limit:  query.Limit,
-	})
+	}
+	tasks, err := s.db.SearchWorkspaceTasks(ctx, wsID, filters)
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+	total, err := s.db.CountWorkspaceTasks(ctx, wsID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	out := make([]domain.TaskSummary, 0, len(tasks))
+	items := make([]domain.TaskSummary, 0, len(tasks))
 	for _, t := range tasks {
-		out = append(out, toTaskSummary(t))
+		items = append(items, toTaskSummary(t))
 	}
-	return out, domain.SourceError{}
+	return &domain.PagedTasks{Items: items, Total: total, Page: query.Page, Limit: query.Limit}, domain.SourceError{}
 }
 
-// SearchFeatures returns feature summaries for a workspace filtered by search/title/status.
-func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID string, query domain.FeatureSearchQuery) ([]domain.FeatureSummary, domain.SourceError) {
+// SearchFeatures returns paged feature summaries for a workspace filtered by search/title/status.
+func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID string, query domain.FeatureSearchQuery) (*domain.PagedFeatures, domain.SourceError) {
 	if query.Page == 0 {
 		query.Page = 1
 	}
@@ -485,13 +499,19 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 	}
 	wsID := database.UUIDString(ws.ID)
 
-	features, err := s.db.SearchWorkspaceFeatures(ctx, wsID, database.FeatureSearchFilters{
+	filters := database.FeatureSearchFilters{
 		Title:  query.Title,
 		Status: query.Status,
 		Sort:   query.Sort,
 		Page:   query.Page,
 		Limit:  query.Limit,
-	})
+	}
+	features, err := s.db.SearchWorkspaceFeatures(ctx, wsID, filters)
+	if err != nil {
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
+	total, err := s.db.CountWorkspaceFeatures(ctx, wsID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -502,10 +522,10 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 	}
 	taskCountsByFeature := taskCountsFromRows(countRows)
 
-	out := make([]domain.FeatureSummary, 0, len(features))
+	items := make([]domain.FeatureSummary, 0, len(features))
 	for _, f := range features {
 		counts := taskCountsByFeature[database.UUIDString(f.FeatureID)]
-		out = append(out, domain.FeatureSummary{
+		items = append(items, domain.FeatureSummary{
 			ID:           database.UUIDString(f.ID),
 			FeatureID:    database.UUIDString(f.FeatureID),
 			FeatureName:  f.FeatureName,
@@ -517,7 +537,7 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 			TaskCounts:   counts,
 		})
 	}
-	return out, domain.SourceError{}
+	return &domain.PagedFeatures{Items: items, Total: total, Page: query.Page, Limit: query.Limit}, domain.SourceError{}
 }
 
 // GetTask returns full task detail including activity.

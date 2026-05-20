@@ -434,11 +434,11 @@ func TestListFeatureTasks_ReturnsSummariesWithAllFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	tasks := decodeAPIData[[]domain.TaskSummary](t, resp)
-	if len(tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	paged := decodeAPIData[domain.PagedTasks](t, resp)
+	if len(paged.Items) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(paged.Items))
 	}
-	for _, task := range tasks {
+	for _, task := range paged.Items {
 		if task.TaskID == "" || task.FeatureID == "" || task.Title == "" || task.Status == "" {
 			t.Errorf("task summary has empty required fields: %+v", task)
 		}
@@ -463,12 +463,12 @@ func TestSearchFeatures_FiltersSortsAndLimits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	features := decodeAPIData[[]domain.FeatureSummary](t, resp)
-	if len(features) != 1 {
-		t.Fatalf("expected 1 feature, got %d", len(features))
+	paged := decodeAPIData[domain.PagedFeatures](t, resp)
+	if len(paged.Items) != 1 {
+		t.Fatalf("expected 1 feature, got %d", len(paged.Items))
 	}
-	if features[0].Title != "Adapter Cleanup" {
-		t.Errorf("expected first sorted feature to be Adapter Cleanup, got %q", features[0].Title)
+	if paged.Items[0].Title != "Adapter Cleanup" {
+		t.Errorf("expected first sorted feature to be Adapter Cleanup, got %q", paged.Items[0].Title)
 	}
 }
 
@@ -495,12 +495,12 @@ func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	tasks := decodeAPIData[[]domain.TaskSummary](t, resp)
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task after limit, got %d", len(tasks))
+	paged := decodeAPIData[domain.PagedTasks](t, resp)
+	if len(paged.Items) != 1 {
+		t.Fatalf("expected 1 task after limit, got %d", len(paged.Items))
 	}
-	if tasks[0].TaskName != "T2" {
-		t.Errorf("expected T2 first for title_desc, got %s", tasks[0].TaskName)
+	if paged.Items[0].TaskName != "T2" {
+		t.Errorf("expected T2 first for title_desc, got %s", paged.Items[0].TaskName)
 	}
 }
 
@@ -527,12 +527,12 @@ func TestSearchWorkspaceTasks_FiltersSortsAndLimits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	tasks := decodeAPIData[[]domain.TaskSummary](t, resp)
-	if len(tasks) != 1 {
-		t.Fatalf("expected second paged task, got %d", len(tasks))
+	paged := decodeAPIData[domain.PagedTasks](t, resp)
+	if len(paged.Items) != 1 {
+		t.Fatalf("expected second paged task, got %d", len(paged.Items))
 	}
-	if tasks[0].TaskName != "T10" {
-		t.Errorf("expected T10 after numeric sort and page 2, got %s", tasks[0].TaskName)
+	if paged.Items[0].TaskName != "T10" {
+		t.Errorf("expected T10 after numeric sort and page 2, got %s", paged.Items[0].TaskName)
 	}
 }
 
@@ -559,8 +559,8 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	tasks := decodeAPIData[[]domain.TaskSummary](t, resp)
-	got := []string{tasks[0].TaskName, tasks[1].TaskName, tasks[2].TaskName}
+	paged := decodeAPIData[domain.PagedTasks](t, resp)
+	got := []string{paged.Items[0].TaskName, paged.Items[1].TaskName, paged.Items[2].TaskName}
 	want := []string{"T1", "T2", "T10"}
 	for i := range want {
 		if got[i] != want[i] {
