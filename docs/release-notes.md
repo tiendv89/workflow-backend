@@ -78,10 +78,11 @@ The `STALE_THRESHOLD_MINUTES` variable controls how `api-service` classifies a w
 ## GitHub Token Behavior
 
 - The `GITHUB_TOKEN` is read by `adapter-service` only. `api-service` never calls GitHub.
-- The token is used for the GitHub Contents API and Git Trees API calls during import and sync. All requests are authenticated.
+- The public workspace import API does not accept or forward a GitHub token from the frontend.
+- The token is used for the GitHub Contents API and Git Trees API calls during import and sync. Authenticated requests use the adapter-service token.
 - If `GITHUB_TOKEN` is absent or invalid, `adapter-service` will return an auth error to `api-service`, which propagates it as a `GITHUB_UNAUTHORIZED` source error to the UI.
 - Public repositories can be imported without a token, but rate limits apply (60 requests/hour per IP). A token raises the limit to 5000 requests/hour per token.
-- The token is never stored in the database.
+- The adapter-service token is stored in `workspace_github_sources.github_token` for that imported workspace and is not exposed in public API responses.
 
 ---
 

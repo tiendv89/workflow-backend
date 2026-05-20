@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +29,13 @@ const (
 	repoURL      = "https://github.com/testorg/test-repo"
 )
 
-func newServer(db service.DatabaseReader, adp service.AdapterCaller) *httptest.Server {
+type testServer struct {
+	router *gin.Engine
+}
+
+func (s *testServer) Close() {}
+
+func newServer(db service.DatabaseReader, adp service.AdapterCaller) *testServer {
 	gin.SetMode(gin.TestMode)
 	svc := service.New(db, adp, 30*time.Minute)
 	h := handler.New(svc)
@@ -37,25 +44,83 @@ func newServer(db service.DatabaseReader, adp service.AdapterCaller) *httptest.S
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	api := r.Group("/api")
 	h.RegisterRoutes(api)
-	return httptest.NewServer(r)
+	return &testServer{router: r}
 }
 
-func get(t *testing.T, srv *httptest.Server, path string) *http.Response {
+func get(t *testing.T, srv *testServer, path string) *http.Response {
 	t.Helper()
-	resp, err := http.Get(srv.URL + path)
-	if err != nil {
-		t.Fatalf("GET %s: %v", path, err)
-	}
-	return resp
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	srv.router.ServeHTTP(rec, req)
+	return rec.Result()
 }
 
-func post(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
+func post(t *testing.T, srv *testServer, path, body string) *http.Response {
 	t.Helper()
-	resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("POST %s: %v", path, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(rec, req)
+	return rec.Result()
+}
+
+type apiEnvelope struct {
+	Status string          `json:"status"`
+	Data   json.RawMessage `json:"data,omitempty"`
+	Error  json.RawMessage `json:"error,omitempty"`
+}
+
+type publicErrorShape struct {
+	Code      domain.ErrorCode `json:"code"`
+	Message   string           `json:"message"`
+	Retryable bool             `json:"retryable"`
+}
+
+func decodeSuccess[T any](t *testing.T, body []byte) T {
+	t.Helper()
+	var envelope apiEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
 	}
-	return resp
+	if envelope.Status != "success" {
+		t.Fatalf("expected success status, got %q body=%s", envelope.Status, string(body))
+	}
+	if len(envelope.Data) == 0 {
+		t.Fatalf("expected data payload, body=%s", string(body))
+	}
+	var out T
+	if err := json.Unmarshal(envelope.Data, &out); err != nil {
+		t.Fatalf("decode data: %v", err)
+	}
+	return out
+}
+
+func decodeError(t *testing.T, body []byte) publicErrorShape {
+	t.Helper()
+	var envelope apiEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if envelope.Status != "error" {
+		t.Fatalf("expected error status, got %q body=%s", envelope.Status, string(body))
+	}
+	if len(envelope.Error) == 0 {
+		t.Fatalf("expected error payload, body=%s", string(body))
+	}
+	var out publicErrorShape
+	if err := json.Unmarshal(envelope.Error, &out); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	return out
+}
+
+func readResponse(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
+	var body bytes.Buffer
+	if _, err := body.ReadFrom(resp.Body); err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return body.Bytes()
 }
 
 // --- T5 scenario 1: first import — persisted by adapter and returned as normalized detail ---
@@ -87,10 +152,7 @@ func TestImport_FirstImport_200WithWorkspaceDetail(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var detail domain.WorkspaceDetail
-	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	detail := decodeSuccess[domain.WorkspaceDetail](t, readResponse(t, resp))
 	if detail.ID != wsID {
 		t.Errorf("expected workspace ID %s, got %s", wsID, detail.ID)
 	}
@@ -132,8 +194,7 @@ func TestImport_AdapterFailure_500WithErrorShape(t *testing.T) {
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("expected 500 for adapter error, got %d", resp.StatusCode)
 	}
-	var apiErr domain.APIError
-	json.NewDecoder(resp.Body).Decode(&apiErr)
+	apiErr := decodeError(t, readResponse(t, resp))
 	if apiErr.Code != domain.ErrAdapterInternal {
 		t.Errorf("expected ErrAdapterInternal, got %s", apiErr.Code)
 	}
@@ -161,8 +222,7 @@ func TestSync_Success_200_FreshSourceState(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 on sync success, got %d", resp.StatusCode)
 	}
-	var detail domain.WorkspaceDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
+	detail := decodeSuccess[domain.WorkspaceDetail](t, readResponse(t, resp))
 	if detail.SourceState.Stale {
 		t.Error("expected stale=false after successful sync with recent run")
 	}
@@ -183,8 +243,7 @@ func TestSync_Failure_WithCache_Returns200_StaleData(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 with stale data, got %d", resp.StatusCode)
 	}
-	var detail domain.WorkspaceDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
+	detail := decodeSuccess[domain.WorkspaceDetail](t, readResponse(t, resp))
 	if !detail.SourceState.Stale {
 		t.Error("expected stale=true after sync failure with cached data")
 	}
@@ -230,8 +289,7 @@ func TestListWorkspaces_TwoWorkspaces_WithSourceState(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var workspaces []domain.WorkspaceSummary
-	json.NewDecoder(resp.Body).Decode(&workspaces)
+	workspaces := decodeSuccess[[]domain.WorkspaceSummary](t, readResponse(t, resp))
 	if len(workspaces) != 2 {
 		t.Errorf("expected 2 workspaces, got %d", len(workspaces))
 	}
@@ -274,8 +332,7 @@ func TestGetWorkspace_Detail_IncludesFeatureAndTaskSummaries(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var detail domain.WorkspaceDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
+	detail := decodeSuccess[domain.WorkspaceDetail](t, readResponse(t, resp))
 	if detail.ID != wsID {
 		t.Errorf("expected ID %s, got %s", wsID, detail.ID)
 	}
@@ -301,13 +358,13 @@ func TestGetWorkspace_NotFound_404(t *testing.T) {
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
 	}
-	var apiErr domain.APIError
-	json.NewDecoder(resp.Body).Decode(&apiErr)
+	body := readResponse(t, resp)
+	apiErr := decodeError(t, body)
 	if apiErr.Code != domain.ErrDatabaseNotFound {
 		t.Errorf("expected ErrDatabaseNotFound, got %q", apiErr.Code)
 	}
-	if apiErr.Source != domain.ErrorSourceDatabase {
-		t.Errorf("expected source 'database', got %q", apiErr.Source)
+	if bytes.Contains(body, []byte(`"source"`)) {
+		t.Fatalf("public error response must not expose source: %s", string(body))
 	}
 }
 
@@ -338,8 +395,7 @@ func TestGetFeature_Detail_IncludesDocumentsTasksActivity(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var detail domain.FeatureDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
+	detail := decodeSuccess[domain.FeatureDetail](t, readResponse(t, resp))
 	if detail.FeatureID != featureRowID {
 		t.Errorf("expected feature_id %s, got %s", featureRowID, detail.FeatureID)
 	}
@@ -397,8 +453,7 @@ func TestListFeatureTasks_ReturnsSummariesWithAllFields(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var tasks []domain.TaskSummary
-	json.NewDecoder(resp.Body).Decode(&tasks)
+	tasks := decodeSuccess[[]domain.TaskSummary](t, readResponse(t, resp))
 	if len(tasks) != 2 {
 		t.Fatalf("expected 2 tasks, got %d", len(tasks))
 	}
@@ -427,8 +482,7 @@ func TestSearchFeatures_FiltersSortsAndLimits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var features []domain.FeatureSummary
-	json.NewDecoder(resp.Body).Decode(&features)
+	features := decodeSuccess[[]domain.FeatureSummary](t, readResponse(t, resp))
 	if len(features) != 1 {
 		t.Fatalf("expected 1 feature, got %d", len(features))
 	}
@@ -460,10 +514,7 @@ func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var tasks []domain.TaskSummary
-	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
-		t.Fatalf("decode tasks: %v", err)
-	}
+	tasks := decodeSuccess[[]domain.TaskSummary](t, readResponse(t, resp))
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 task after limit, got %d", len(tasks))
 	}
@@ -495,10 +546,7 @@ func TestSearchWorkspaceTasks_FiltersSortsAndLimits(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var tasks []domain.TaskSummary
-	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
-		t.Fatalf("decode tasks: %v", err)
-	}
+	tasks := decodeSuccess[[]domain.TaskSummary](t, readResponse(t, resp))
 	if len(tasks) != 1 {
 		t.Fatalf("expected second paged task, got %d", len(tasks))
 	}
@@ -530,10 +578,7 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var tasks []domain.TaskSummary
-	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
-		t.Fatalf("decode tasks: %v", err)
-	}
+	tasks := decodeSuccess[[]domain.TaskSummary](t, readResponse(t, resp))
 	got := []string{tasks[0].TaskName, tasks[1].TaskName, tasks[2].TaskName}
 	want := []string{"T1", "T2", "T10"}
 	for i := range want {
@@ -597,8 +642,7 @@ func TestGetTask_Detail_UsesUUIDFeatureAndTaskIDs(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var detail domain.TaskDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
+	detail := decodeSuccess[domain.TaskDetail](t, readResponse(t, resp))
 	if detail.TaskID != taskRowID {
 		t.Errorf("expected task_id %s, got %s", taskRowID, detail.TaskID)
 	}
@@ -639,8 +683,7 @@ func TestGetWorkspaceTask_Detail_UsesUUIDWorkspaceAndTaskIDs(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var detail domain.TaskDetail
-	json.NewDecoder(resp.Body).Decode(&detail)
+	detail := decodeSuccess[domain.TaskDetail](t, readResponse(t, resp))
 	if detail.TaskID != taskRowID {
 		t.Errorf("expected task_id %s, got %s", taskRowID, detail.TaskID)
 	}
@@ -684,8 +727,7 @@ func TestListActivity_WorkspaceLevel_ReturnsEvents(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var events []domain.ActivityEvent
-	json.NewDecoder(resp.Body).Decode(&events)
+	events := decodeSuccess[[]domain.ActivityEvent](t, readResponse(t, resp))
 	if len(events) != 2 {
 		t.Errorf("expected 2 events, got %d", len(events))
 	}
@@ -721,10 +763,7 @@ func TestListActivity_WithTaskOnlyFilter_ReturnsTaskEvents(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 with taskId filter, got %d", resp.StatusCode)
 	}
-	var events []domain.ActivityEvent
-	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
-		t.Fatalf("decode events: %v", err)
-	}
+	events := decodeSuccess[[]domain.ActivityEvent](t, readResponse(t, resp))
 	if len(events) != 1 {
 		t.Fatalf("expected 1 task activity event, got %d", len(events))
 	}
@@ -750,10 +789,7 @@ func TestListActivity_WithFeatureAndTaskFilters_ReturnsMatchingTaskEvents(t *tes
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 with featureId and taskId filters, got %d", resp.StatusCode)
 	}
-	var events []domain.ActivityEvent
-	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
-		t.Fatalf("decode events: %v", err)
-	}
+	events := decodeSuccess[[]domain.ActivityEvent](t, readResponse(t, resp))
 	if len(events) != 1 {
 		t.Fatalf("expected 1 filtered activity event, got %d", len(events))
 	}
@@ -784,18 +820,16 @@ func TestErrorResponse_HasRequiredFields(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var apiErr domain.APIError
-	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
-		t.Fatalf("decode error response: %v", err)
-	}
+	body := readResponse(t, resp)
+	apiErr := decodeError(t, body)
 	if apiErr.Code == "" {
 		t.Error("error response must have a non-empty 'code' field")
 	}
 	if apiErr.Message == "" {
 		t.Error("error response must have a non-empty 'message' field")
 	}
-	if apiErr.Source == "" {
-		t.Error("error response must have a non-empty 'source' field")
+	if bytes.Contains(body, []byte(`"source"`)) {
+		t.Fatalf("public error response must not expose source: %s", string(body))
 	}
 }
 
@@ -806,10 +840,10 @@ func TestHealthz_NotShadowedByWorkspaceRoutes(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/healthz")
-	if err != nil {
-		t.Fatalf("GET /healthz: %v", err)
-	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	srv.router.ServeHTTP(rec, req)
+	resp := rec.Result()
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 from /healthz, got %d", resp.StatusCode)
@@ -867,10 +901,7 @@ func TestGetWorkspace_IncludesStaleSourceState_WhenNoSyncRun(t *testing.T) {
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var detail domain.WorkspaceDetail
-	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	detail := decodeSuccess[domain.WorkspaceDetail](t, readResponse(t, resp))
 	if !detail.SourceState.Stale {
 		t.Error("expected source_state.stale=true when no sync run exists")
 	}
@@ -892,10 +923,7 @@ func TestGetWorkspace_IncludesFreshSourceState_AfterRecentSuccessfulSync(t *test
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var detail domain.WorkspaceDetail
-	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	detail := decodeSuccess[domain.WorkspaceDetail](t, readResponse(t, resp))
 	if detail.SourceState.Stale {
 		t.Error("expected source_state.stale=false after recent successful sync")
 	}
@@ -921,10 +949,7 @@ func TestGetWorkspace_IncludesStaleSourceState_AfterFailedSyncRun(t *testing.T) 
 	resp := get(t, srv, "/api/workspaces/"+wsID)
 	defer resp.Body.Close()
 
-	var detail domain.WorkspaceDetail
-	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	detail := decodeSuccess[domain.WorkspaceDetail](t, readResponse(t, resp))
 	if !detail.SourceState.Stale {
 		t.Error("expected source_state.stale=true after failed sync")
 	}
