@@ -344,8 +344,8 @@ func TestGetWorkspace_NotFound_404(t *testing.T) {
 	if apiErr.Code != domain.ErrDatabaseNotFound {
 		t.Errorf("expected ErrDatabaseNotFound, got %q", apiErr.Code)
 	}
-	if apiErr.Source != "" {
-		t.Errorf("did not expect public error source field, got %q", apiErr.Source)
+	if apiErr.Source != string(domain.ErrorSourceDatabase) {
+		t.Errorf("expected error source %q, got %q", domain.ErrorSourceDatabase, apiErr.Source)
 	}
 }
 
@@ -808,8 +808,8 @@ func TestErrorResponse_HasRequiredFields(t *testing.T) {
 	if apiErr.Message == "" {
 		t.Error("error response must have a non-empty 'message' field")
 	}
-	if apiErr.Source != "" {
-		t.Errorf("did not expect public error source field, got %q", apiErr.Source)
+	if apiErr.Source != string(domain.ErrorSourceDatabase) {
+		t.Errorf("expected error source %q, got %q", domain.ErrorSourceDatabase, apiErr.Source)
 	}
 }
 

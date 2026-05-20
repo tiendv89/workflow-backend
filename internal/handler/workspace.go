@@ -244,11 +244,12 @@ type apiErrorResponse struct {
 }
 
 type apiErrorBody struct {
-	Code       domain.ErrorCode `json:"code"`
-	Message    string           `json:"message"`
-	Retryable  bool             `json:"retryable"`
-	Path       string           `json:"path,omitempty"`
-	CachedData interface{}      `json:"cached_data,omitempty"`
+	Code       domain.ErrorCode   `json:"code"`
+	Message    string             `json:"message"`
+	Source     domain.ErrorSource `json:"source"`
+	Retryable  bool               `json:"retryable"`
+	Path       string             `json:"path,omitempty"`
+	CachedData interface{}        `json:"cached_data,omitempty"`
 }
 
 func respondOK(c *gin.Context, data interface{}) {
@@ -303,6 +304,7 @@ func respondSourceError(c *gin.Context, se domain.SourceError, cachedData interf
 	errBody := &apiErrorBody{
 		Code:      se.Code,
 		Message:   se.Message,
+		Source:    se.Source,
 		Retryable: se.Retryable,
 		Path:      se.Path,
 	}

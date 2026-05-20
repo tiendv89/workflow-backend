@@ -369,8 +369,11 @@ func TestPublicResponseEnvelope_SuccessAndError(t *testing.T) {
 	if err := json.Unmarshal(rawError["error"], &errorFields); err != nil {
 		t.Fatalf("decode raw error body: %v", err)
 	}
-	if _, ok := errorFields["source"]; ok {
-		t.Fatalf("did not expect public error source field: %s", errorRecorder.Body.String())
+	if _, ok := errorFields["source"]; !ok {
+		t.Fatalf("expected public error source field: %s", errorRecorder.Body.String())
+	}
+	if errorBody.Error.Source != string(domain.ErrorSourceDatabase) {
+		t.Fatalf("expected error source %q, got %q", domain.ErrorSourceDatabase, errorBody.Error.Source)
 	}
 }
 
@@ -756,7 +759,7 @@ func TestErrorResponseShape(t *testing.T) {
 	if apiErr.Message == "" {
 		t.Error("expected non-empty error message")
 	}
-	if apiErr.Source != "" {
-		t.Errorf("did not expect public error source field, got %q", apiErr.Source)
+	if apiErr.Source != string(domain.ErrorSourceDatabase) {
+		t.Errorf("expected error source %q, got %q", domain.ErrorSourceDatabase, apiErr.Source)
 	}
 }
