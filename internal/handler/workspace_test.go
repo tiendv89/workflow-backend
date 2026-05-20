@@ -248,6 +248,53 @@ func newTestRouter(db service.DatabaseReader, adp service.AdapterCaller) *gin.En
 
 // --- tests ---
 
+type testAPIEnvelope struct {
+	Success bool            `json:"success"`
+	Data    json.RawMessage `json:"data"`
+	Error   *testAPIError   `json:"error"`
+}
+
+type testAPIError struct {
+	Code      domain.ErrorCode `json:"code"`
+	Message   string           `json:"message"`
+	Retryable bool             `json:"retryable"`
+	Source    string           `json:"source"`
+}
+
+func decodeAPIData[T any](t *testing.T, body []byte) T {
+	t.Helper()
+	var envelope testAPIEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("decode response envelope: %v", err)
+	}
+	if !envelope.Success {
+		t.Fatalf("expected success envelope, got body=%s", string(body))
+	}
+	if envelope.Error != nil {
+		t.Fatalf("did not expect error field in success envelope: %+v", envelope.Error)
+	}
+	var out T
+	if err := json.Unmarshal(envelope.Data, &out); err != nil {
+		t.Fatalf("decode response data: %v", err)
+	}
+	return out
+}
+
+func decodeAPIError(t *testing.T, body []byte) testAPIError {
+	t.Helper()
+	var envelope testAPIEnvelope
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("decode error envelope: %v", err)
+	}
+	if envelope.Success {
+		t.Fatalf("expected error envelope, got body=%s", string(body))
+	}
+	if envelope.Error == nil {
+		t.Fatalf("expected error body, got body=%s", string(body))
+	}
+	return *envelope.Error
+}
+
 func TestListWorkspaces_200(t *testing.T) {
 	ws := makeTestWorkspace(handlerTestWSID)
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
@@ -261,12 +308,69 @@ func TestListWorkspaces_200(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var result []domain.WorkspaceSummary
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	result := decodeAPIData[[]domain.WorkspaceSummary](t, w.Body.Bytes())
 	if len(result) != 1 {
 		t.Errorf("expected 1 workspace, got %d", len(result))
+	}
+}
+
+func TestPublicResponseEnvelope_SuccessAndError(t *testing.T) {
+	ws := makeTestWorkspace(handlerTestWSID)
+	r := newTestRouter(&fakeDB{workspaces: []database.Workspace{ws}}, &fakeAdapter{})
+
+	successRecorder := httptest.NewRecorder()
+	successReq, _ := http.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	r.ServeHTTP(successRecorder, successReq)
+
+	var successBody map[string]json.RawMessage
+	if err := json.Unmarshal(successRecorder.Body.Bytes(), &successBody); err != nil {
+		t.Fatalf("decode success envelope: %v", err)
+	}
+	if got := string(successBody["success"]); got != "true" {
+		t.Fatalf("expected success=true envelope, got %s body=%s", got, successRecorder.Body.String())
+	}
+	if _, ok := successBody["data"]; !ok {
+		t.Fatalf("expected success response to include data: %s", successRecorder.Body.String())
+	}
+	if _, ok := successBody["error"]; ok {
+		t.Fatalf("did not expect error field in success response: %s", successRecorder.Body.String())
+	}
+
+	errorRecorder := httptest.NewRecorder()
+	errorReq, _ := http.NewRequest(http.MethodGet, "/api/workspaces/99999999-9999-9999-9999-999999999999/activity", nil)
+	r.ServeHTTP(errorRecorder, errorReq)
+
+	var errorBody struct {
+		Success bool `json:"success"`
+		Error   struct {
+			Code      domain.ErrorCode `json:"code"`
+			Message   string           `json:"message"`
+			Retryable bool             `json:"retryable"`
+			Source    string           `json:"source"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(errorRecorder.Body.Bytes(), &errorBody); err != nil {
+		t.Fatalf("decode error envelope: %v", err)
+	}
+	if errorBody.Success {
+		t.Fatalf("expected success=false error envelope: %s", errorRecorder.Body.String())
+	}
+	if errorBody.Error.Code != domain.ErrDatabaseNotFound {
+		t.Fatalf("expected error code %s, got %s", domain.ErrDatabaseNotFound, errorBody.Error.Code)
+	}
+	if errorBody.Error.Message == "" {
+		t.Fatal("expected error message")
+	}
+	var rawError map[string]json.RawMessage
+	if err := json.Unmarshal(errorRecorder.Body.Bytes(), &rawError); err != nil {
+		t.Fatalf("decode raw error envelope: %v", err)
+	}
+	var errorFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawError["error"], &errorFields); err != nil {
+		t.Fatalf("decode raw error body: %v", err)
+	}
+	if _, ok := errorFields["source"]; ok {
+		t.Fatalf("did not expect public error source field: %s", errorRecorder.Body.String())
 	}
 }
 
@@ -283,10 +387,7 @@ func TestGetWorkspace_200(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var detail domain.WorkspaceDetail
-	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	detail := decodeAPIData[domain.WorkspaceDetail](t, w.Body.Bytes())
 	if detail.ID != handlerTestWSID {
 		t.Errorf("expected workspace ID %s, got %s", handlerTestWSID, detail.ID)
 	}
@@ -307,10 +408,7 @@ func TestGetWorkspace_404(t *testing.T) {
 		t.Errorf("expected 404, got %d", w.Code)
 	}
 
-	var apiErr domain.APIError
-	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
-		t.Fatalf("decode error response: %v", err)
-	}
+	apiErr := decodeAPIError(t, w.Body.Bytes())
 	if apiErr.Code != domain.ErrDatabaseNotFound {
 		t.Errorf("expected ErrDatabaseNotFound, got %s", apiErr.Code)
 	}
@@ -348,10 +446,7 @@ func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	var detail domain.WorkspaceDetail
-	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	detail := decodeAPIData[domain.WorkspaceDetail](t, w.Body.Bytes())
 	if detail.ID != handlerTestWSID {
 		t.Errorf("expected workspace ID %s, got %s", handlerTestWSID, detail.ID)
 	}
@@ -424,10 +519,7 @@ func TestSyncWorkspace_200_StaleOnAdapterFailure(t *testing.T) {
 		t.Errorf("expected 200 with stale data, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var detail domain.WorkspaceDetail
-	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	detail := decodeAPIData[domain.WorkspaceDetail](t, w.Body.Bytes())
 	if !detail.SourceState.Stale {
 		t.Error("expected stale=true in response")
 	}
@@ -513,10 +605,7 @@ func TestListFeatureTasks_200(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var tasks []domain.TaskSummary
-	if err := json.Unmarshal(w.Body.Bytes(), &tasks); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	tasks := decodeAPIData[[]domain.TaskSummary](t, w.Body.Bytes())
 	if len(tasks) != 1 {
 		t.Errorf("expected 1 task, got %d", len(tasks))
 	}
@@ -602,10 +691,7 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var detail domain.TaskDetail
-	if err := json.NewDecoder(w.Body).Decode(&detail); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	detail := decodeAPIData[domain.TaskDetail](t, w.Body.Bytes())
 	if detail.TaskID != handlerTestTaskRowID {
 		t.Errorf("expected task_id %s, got %s", handlerTestTaskRowID, detail.TaskID)
 	}
@@ -663,17 +749,14 @@ func TestErrorResponseShape(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
 	r.ServeHTTP(w, req)
 
-	var apiErr domain.APIError
-	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	apiErr := decodeAPIError(t, w.Body.Bytes())
 	if apiErr.Code == "" {
 		t.Error("expected non-empty error code")
 	}
 	if apiErr.Message == "" {
 		t.Error("expected non-empty error message")
 	}
-	if apiErr.Source == "" {
-		t.Error("expected non-empty error source")
+	if apiErr.Source != "" {
+		t.Errorf("did not expect public error source field, got %q", apiErr.Source)
 	}
 }

@@ -44,7 +44,7 @@ func (h *WorkspaceHandler) ListWorkspaces(c *gin.Context) {
 		respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	respondOK(c, result)
 }
 
 // ImportWorkspace godoc
@@ -52,12 +52,7 @@ func (h *WorkspaceHandler) ListWorkspaces(c *gin.Context) {
 func (h *WorkspaceHandler) ImportWorkspace(c *gin.Context) {
 	var input domain.ImportInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		c.JSON(http.StatusBadRequest, domain.APIError{
-			Code:      domain.ErrValidationMissingInput,
-			Message:   err.Error(),
-			Source:    domain.ErrorSourceValidation,
-			Retryable: false,
-		})
+		respondSourceError(c, domain.NewValidationError(domain.ErrValidationMissingInput, err.Error()), nil)
 		return
 	}
 
@@ -66,7 +61,7 @@ func (h *WorkspaceHandler) ImportWorkspace(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	respondOK(c, detail)
 }
 
 // GetWorkspace godoc
@@ -78,7 +73,7 @@ func (h *WorkspaceHandler) GetWorkspace(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	respondOK(c, detail)
 }
 
 // SearchFeatures godoc
@@ -101,7 +96,7 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, features)
+	respondOK(c, features)
 }
 
 // SearchTasks godoc
@@ -127,7 +122,7 @@ func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, tasks)
+	respondOK(c, tasks)
 }
 
 // SearchWorkspaceTasks godoc
@@ -152,7 +147,7 @@ func (h *WorkspaceHandler) SearchWorkspaceTasks(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, tasks)
+	respondOK(c, tasks)
 }
 
 // GetWorkspaceTask godoc
@@ -165,7 +160,7 @@ func (h *WorkspaceHandler) GetWorkspaceTask(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	respondOK(c, detail)
 }
 
 // SyncWorkspace godoc
@@ -177,8 +172,7 @@ func (h *WorkspaceHandler) SyncWorkspace(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	// On sync success or stale-cache fallback, always return 200 with cached_data.
-	c.JSON(http.StatusOK, detail)
+	respondOK(c, detail)
 }
 
 // GetFeature godoc
@@ -191,7 +185,7 @@ func (h *WorkspaceHandler) GetFeature(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	respondOK(c, detail)
 }
 
 // ListFeatureTasks godoc
@@ -204,7 +198,7 @@ func (h *WorkspaceHandler) ListFeatureTasks(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, tasks)
+	respondOK(c, tasks)
 }
 
 // GetTask godoc
@@ -218,7 +212,7 @@ func (h *WorkspaceHandler) GetTask(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, detail)
+	respondOK(c, detail)
 }
 
 // ListActivity godoc
@@ -234,22 +228,47 @@ func (h *WorkspaceHandler) ListActivity(c *gin.Context) {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusOK, events)
+	respondOK(c, events)
 }
 
 // --- error response helpers ---
+
+type apiSuccessResponse struct {
+	Success bool        `json:"success"`
+	Data    interface{} `json:"data"`
+}
+
+type apiErrorResponse struct {
+	Success bool          `json:"success"`
+	Error   *apiErrorBody `json:"error"`
+}
+
+type apiErrorBody struct {
+	Code       domain.ErrorCode `json:"code"`
+	Message    string           `json:"message"`
+	Retryable  bool             `json:"retryable"`
+	Path       string           `json:"path,omitempty"`
+	CachedData interface{}      `json:"cached_data,omitempty"`
+}
+
+func respondOK(c *gin.Context, data interface{}) {
+	c.JSON(http.StatusOK, apiSuccessResponse{
+		Success: true,
+		Data:    data,
+	})
+}
 
 func respondError(c *gin.Context, err error) {
 	if se, ok := err.(domain.SourceError); ok {
 		respondSourceError(c, se, nil)
 		return
 	}
-	c.JSON(http.StatusInternalServerError, domain.APIError{
+	respondSourceError(c, domain.SourceError{
 		Code:      domain.ErrAdapterInternal,
 		Message:   err.Error(),
 		Source:    domain.ErrorSourceAdapter,
 		Retryable: true,
-	})
+	}, nil)
 }
 
 func parsePagination(c *gin.Context) (int, int, bool) {
@@ -281,7 +300,19 @@ func parsePagination(c *gin.Context) (int, int, bool) {
 
 func respondSourceError(c *gin.Context, se domain.SourceError, cachedData interface{}) {
 	statusCode := sourceErrorHTTPStatus(se)
-	c.JSON(statusCode, domain.FromSourceError(se, cachedData))
+	errBody := &apiErrorBody{
+		Code:      se.Code,
+		Message:   se.Message,
+		Retryable: se.Retryable,
+		Path:      se.Path,
+	}
+	if cachedData != nil {
+		errBody.CachedData = cachedData
+	}
+	c.JSON(statusCode, apiErrorResponse{
+		Success: false,
+		Error:   errBody,
+	})
 }
 
 func sourceErrorHTTPStatus(se domain.SourceError) int {
