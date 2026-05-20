@@ -230,6 +230,13 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 // On sync failure with cached data, returns cached data marked stale.
 // On sync failure without cached data, returns a structured source error.
 func (s *WorkspaceService) SyncWorkspace(ctx context.Context, workspaceID string) (*domain.WorkspaceDetail, domain.SourceError) {
+	if _, err := s.db.GetWorkspace(ctx, workspaceID); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
+		}
+		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	}
+
 	if err := s.adapter.SyncWorkspace(ctx, workspaceID); err != nil {
 		// Sync failed — try to return cached data with stale marker.
 		detail, dbErr := s.GetWorkspace(ctx, workspaceID)
@@ -339,16 +346,7 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 
 // ListFeatureTasks returns task summaries for all tasks in a feature.
 func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]domain.TaskSummary, domain.SourceError) {
-	ws, err := s.db.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
-		}
-		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
-	}
-	wsID := database.UUIDString(ws.ID)
-
-	feat, err := s.db.GetWorkspaceFeature(ctx, wsID, featureID)
+	feat, err := s.db.GetWorkspaceFeature(ctx, workspaceID, featureID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("feature", featureID)
@@ -356,7 +354,7 @@ func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, fe
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	tasks, err := s.db.ListFeatureTasks(ctx, wsID, database.UUIDString(feat.FeatureID))
+	tasks, err := s.db.ListFeatureTasks(ctx, workspaceID, database.UUIDString(feat.FeatureID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -383,16 +381,7 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of task_id_asc, task_id_desc, title_asc, title_desc, status_asc, status_desc, repo_asc, repo_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
 	}
 
-	ws, err := s.db.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
-		}
-		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
-	}
-	wsID := database.UUIDString(ws.ID)
-
-	feat, err := s.db.GetWorkspaceFeature(ctx, wsID, featureID)
+	feat, err := s.db.GetWorkspaceFeature(ctx, workspaceID, featureID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("feature", featureID)
@@ -410,11 +399,11 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 		Page:   query.Page,
 		Limit:  query.Limit,
 	}
-	tasks, err := s.db.SearchFeatureTasks(ctx, wsID, featureUUID, filters)
+	tasks, err := s.db.SearchFeatureTasks(ctx, workspaceID, featureUUID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	total, err := s.db.CountFeatureTasks(ctx, wsID, featureUUID, filters)
+	total, err := s.db.CountFeatureTasks(ctx, workspaceID, featureUUID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -441,15 +430,6 @@ func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID
 		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of task_id_asc, task_id_desc, title_asc, title_desc, status_asc, status_desc, repo_asc, repo_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
 	}
 
-	ws, err := s.db.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
-		}
-		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
-	}
-	wsID := database.UUIDString(ws.ID)
-
 	filters := database.TaskSearchFilters{
 		TaskID: query.TaskID,
 		Title:  query.Title,
@@ -459,11 +439,11 @@ func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID
 		Page:   query.Page,
 		Limit:  query.Limit,
 	}
-	tasks, err := s.db.SearchWorkspaceTasks(ctx, wsID, filters)
+	tasks, err := s.db.SearchWorkspaceTasks(ctx, workspaceID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	total, err := s.db.CountWorkspaceTasks(ctx, wsID, filters)
+	total, err := s.db.CountWorkspaceTasks(ctx, workspaceID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -490,15 +470,6 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of title_asc, title_desc, status_asc, status_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
 	}
 
-	ws, err := s.db.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
-		}
-		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
-	}
-	wsID := database.UUIDString(ws.ID)
-
 	filters := database.FeatureSearchFilters{
 		Title:  query.Title,
 		Status: query.Status,
@@ -506,21 +477,24 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 		Page:   query.Page,
 		Limit:  query.Limit,
 	}
-	features, err := s.db.SearchWorkspaceFeatures(ctx, wsID, filters)
+	features, err := s.db.SearchWorkspaceFeatures(ctx, workspaceID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	total, err := s.db.CountWorkspaceFeatures(ctx, wsID, filters)
+	total, err := s.db.CountWorkspaceFeatures(ctx, workspaceID, filters)
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	countRows, err := s.db.ListFeatureTaskCounts(ctx, wsID, featureIDs(features))
-	if err != nil {
-		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+	taskCountsByFeature := map[string]domain.TaskCounts{}
+	if len(features) > 0 {
+		countRows, err := s.db.ListFeatureTaskCounts(ctx, workspaceID, featureIDs(features))
+		if err != nil {
+			return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
+		}
+		taskCountsByFeature = taskCountsFromRows(countRows)
 	}
-	taskCountsByFeature := taskCountsFromRows(countRows)
 
 	items := make([]domain.FeatureSummary, 0, len(features))
 	for _, f := range features {

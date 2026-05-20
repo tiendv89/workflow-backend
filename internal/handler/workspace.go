@@ -2,22 +2,37 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/tiendv89/workflow-backend/internal/domain"
-	"github.com/tiendv89/workflow-backend/internal/service"
 )
+
+// Service is the interface the handler depends on.
+type Service interface {
+	ListWorkspaces(ctx context.Context) ([]domain.WorkspaceSummary, error)
+	ImportWorkspace(ctx context.Context, input domain.ImportInput) (*domain.WorkspaceDetail, domain.SourceError)
+	GetWorkspace(ctx context.Context, workspaceID string) (*domain.WorkspaceDetail, domain.SourceError)
+	SearchFeatures(ctx context.Context, workspaceID string, query domain.FeatureSearchQuery) (*domain.PagedFeatures, domain.SourceError)
+	SearchTasks(ctx context.Context, workspaceID, featureID string, query domain.TaskSearchQuery) (*domain.PagedTasks, domain.SourceError)
+	SearchWorkspaceTasks(ctx context.Context, workspaceID string, query domain.TaskSearchQuery) (*domain.PagedTasks, domain.SourceError)
+	GetWorkspaceTask(ctx context.Context, workspaceID, taskID string) (*domain.TaskDetail, domain.SourceError)
+	SyncWorkspace(ctx context.Context, workspaceID string) (*domain.WorkspaceDetail, domain.SourceError)
+	GetFeature(ctx context.Context, workspaceID, featureID string) (*domain.FeatureDetail, domain.SourceError)
+	GetTask(ctx context.Context, workspaceID, featureID, taskID string) (*domain.TaskDetail, domain.SourceError)
+	ListActivity(ctx context.Context, workspaceID string, scope domain.ActivityScope) ([]domain.ActivityEvent, domain.SourceError)
+}
 
 // WorkspaceHandler holds a reference to the source service.
 type WorkspaceHandler struct {
-	svc *service.WorkspaceService
+	svc Service
 }
 
 // New creates a new WorkspaceHandler.
-func New(svc *service.WorkspaceService) *WorkspaceHandler {
+func New(svc Service) *WorkspaceHandler {
 	return &WorkspaceHandler{svc: svc}
 }
 

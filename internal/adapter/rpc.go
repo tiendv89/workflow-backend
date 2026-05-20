@@ -110,6 +110,9 @@ func (c *Client) post(ctx context.Context, path string, body []byte) ([]byte, in
 	if resp.StatusCode >= 400 {
 		return nil, resp.StatusCode, decodeSourceErrorResponse(path, resp.StatusCode, data)
 	}
+	if resp.StatusCode >= 300 {
+		return nil, resp.StatusCode, sourceErrorFromHTTPStatus(path, resp.StatusCode, data)
+	}
 	return data, resp.StatusCode, nil
 }
 

@@ -29,6 +29,9 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid PORT: %w", err)
 		}
+		if p < 1 || p > 65535 {
+			return nil, fmt.Errorf("invalid PORT: must be between 1 and 65535")
+		}
 		port = p
 	}
 
