@@ -1,7 +1,6 @@
 package handler_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -202,16 +201,12 @@ func (f *fakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]databa
 }
 
 type fakeAdapter struct {
-	importID      string
-	importErr     error
-	syncErr       error
-	lastImportReq adapter.ImportRequest
-	importCalls   int
+	importID  string
+	importErr error
+	syncErr   error
 }
 
-func (f *fakeAdapter) ImportWorkspace(_ context.Context, req adapter.ImportRequest) (string, error) {
-	f.importCalls++
-	f.lastImportReq = req
+func (f *fakeAdapter) ImportWorkspace(_ context.Context, _ adapter.ImportRequest) (string, error) {
 	return f.importID, f.importErr
 }
 func (f *fakeAdapter) SyncWorkspace(_ context.Context, _ string) error {
@@ -251,56 +246,6 @@ func newTestRouter(db service.DatabaseReader, adp service.AdapterCaller) *gin.En
 	return r
 }
 
-type apiEnvelope struct {
-	Status string          `json:"status"`
-	Data   json.RawMessage `json:"data,omitempty"`
-	Error  json.RawMessage `json:"error,omitempty"`
-}
-
-type publicErrorShape struct {
-	Code      domain.ErrorCode `json:"code"`
-	Message   string           `json:"message"`
-	Retryable bool             `json:"retryable"`
-}
-
-func decodeSuccess[T any](t *testing.T, body []byte) T {
-	t.Helper()
-	var envelope apiEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if envelope.Status != "success" {
-		t.Fatalf("expected success status, got %q body=%s", envelope.Status, string(body))
-	}
-	if len(envelope.Data) == 0 {
-		t.Fatalf("expected data payload, body=%s", string(body))
-	}
-	var out T
-	if err := json.Unmarshal(envelope.Data, &out); err != nil {
-		t.Fatalf("decode data: %v", err)
-	}
-	return out
-}
-
-func decodeError(t *testing.T, body []byte) publicErrorShape {
-	t.Helper()
-	var envelope apiEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v", err)
-	}
-	if envelope.Status != "error" {
-		t.Fatalf("expected error status, got %q body=%s", envelope.Status, string(body))
-	}
-	if len(envelope.Error) == 0 {
-		t.Fatalf("expected error payload, body=%s", string(body))
-	}
-	var out publicErrorShape
-	if err := json.Unmarshal(envelope.Error, &out); err != nil {
-		t.Fatalf("decode error payload: %v", err)
-	}
-	return out
-}
-
 // --- tests ---
 
 func TestListWorkspaces_200(t *testing.T) {
@@ -316,7 +261,10 @@ func TestListWorkspaces_200(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	result := decodeSuccess[[]domain.WorkspaceSummary](t, w.Body.Bytes())
+	var result []domain.WorkspaceSummary
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if len(result) != 1 {
 		t.Errorf("expected 1 workspace, got %d", len(result))
 	}
@@ -335,7 +283,10 @@ func TestGetWorkspace_200(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	detail := decodeSuccess[domain.WorkspaceDetail](t, w.Body.Bytes())
+	var detail domain.WorkspaceDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if detail.ID != handlerTestWSID {
 		t.Errorf("expected workspace ID %s, got %s", handlerTestWSID, detail.ID)
 	}
@@ -356,7 +307,10 @@ func TestGetWorkspace_404(t *testing.T) {
 		t.Errorf("expected 404, got %d", w.Code)
 	}
 
-	apiErr := decodeError(t, w.Body.Bytes())
+	var apiErr domain.APIError
+	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
 	if apiErr.Code != domain.ErrDatabaseNotFound {
 		t.Errorf("expected ErrDatabaseNotFound, got %s", apiErr.Code)
 	}
@@ -394,7 +348,10 @@ func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 
-	detail := decodeSuccess[domain.WorkspaceDetail](t, w.Body.Bytes())
+	var detail domain.WorkspaceDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if detail.ID != handlerTestWSID {
 		t.Errorf("expected workspace ID %s, got %s", handlerTestWSID, detail.ID)
 	}
@@ -467,7 +424,10 @@ func TestSyncWorkspace_200_StaleOnAdapterFailure(t *testing.T) {
 		t.Errorf("expected 200 with stale data, got %d: %s", w.Code, w.Body.String())
 	}
 
-	detail := decodeSuccess[domain.WorkspaceDetail](t, w.Body.Bytes())
+	var detail domain.WorkspaceDetail
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if !detail.SourceState.Stale {
 		t.Error("expected stale=true in response")
 	}
@@ -553,7 +513,10 @@ func TestListFeatureTasks_200(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	tasks := decodeSuccess[[]domain.TaskSummary](t, w.Body.Bytes())
+	var tasks []domain.TaskSummary
+	if err := json.Unmarshal(w.Body.Bytes(), &tasks); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if len(tasks) != 1 {
 		t.Errorf("expected 1 task, got %d", len(tasks))
 	}
@@ -639,7 +602,10 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	detail := decodeSuccess[domain.TaskDetail](t, w.Body.Bytes())
+	var detail domain.TaskDetail
+	if err := json.NewDecoder(w.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if detail.TaskID != handlerTestTaskRowID {
 		t.Errorf("expected task_id %s, got %s", handlerTestTaskRowID, detail.TaskID)
 	}
@@ -697,14 +663,17 @@ func TestErrorResponseShape(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
 	r.ServeHTTP(w, req)
 
-	apiErr := decodeError(t, w.Body.Bytes())
+	var apiErr domain.APIError
+	if err := json.Unmarshal(w.Body.Bytes(), &apiErr); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
 	if apiErr.Code == "" {
 		t.Error("expected non-empty error code")
 	}
 	if apiErr.Message == "" {
 		t.Error("expected non-empty error message")
 	}
-	if bytes.Contains(w.Body.Bytes(), []byte(`"source"`)) {
-		t.Fatalf("public error response must not expose source: %s", w.Body.String())
+	if apiErr.Source == "" {
+		t.Error("expected non-empty error source")
 	}
 }

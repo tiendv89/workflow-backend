@@ -1,30 +1,31 @@
 package adapter
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
-	"strings"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/tiendv89/workflow-backend/internal/domain"
 )
 
 func TestImportWorkspace_DecodesSourceErrorResponse(t *testing.T) {
-	client := New("https://adapter.local")
-	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/internal/workspaces/import" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		return jsonResponse(http.StatusUnauthorized, domain.SourceError{
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(domain.SourceError{
 			Code:      domain.ErrGitHubUnauthorized,
 			Message:   "GitHub token is missing or invalid",
 			Source:    domain.ErrorSourceGitHub,
 			Retryable: false,
-		}), nil
-	})
+		})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL)
 	_, err := client.ImportWorkspace(context.Background(), ImportRequest{RepoURL: "https://github.com/org/repo"})
 	if err == nil {
 		t.Fatal("expected error")
@@ -46,15 +47,18 @@ func TestImportWorkspace_DecodesSourceErrorResponse(t *testing.T) {
 }
 
 func TestImportWorkspace_DecodesAPIErrorResponse(t *testing.T) {
-	client := New("https://adapter.local")
-	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(http.StatusTooManyRequests, domain.APIError{
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_ = json.NewEncoder(w).Encode(domain.APIError{
 			Code:      domain.ErrGitHubRateLimit,
 			Message:   "GitHub API rate limit exceeded",
 			Source:    domain.ErrorSourceGitHub,
 			Retryable: true,
-		}), nil
-	})
+		})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL)
 	_, err := client.ImportWorkspace(context.Background(), ImportRequest{RepoURL: "https://github.com/org/repo"})
 	if err == nil {
 		t.Fatal("expected error")
@@ -76,10 +80,13 @@ func TestImportWorkspace_DecodesAPIErrorResponse(t *testing.T) {
 }
 
 func TestImportWorkspace_MapsStatusWhenErrorBodyIsNotStructured(t *testing.T) {
-	client := New("https://adapter.local")
-	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return textResponse(http.StatusUnauthorized, "unauthorized"), nil
-	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("unauthorized"))
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL)
 	_, err := client.ImportWorkspace(context.Background(), ImportRequest{RepoURL: "https://github.com/org/repo"})
 	if err == nil {
 		t.Fatal("expected error")
@@ -101,17 +108,19 @@ func TestImportWorkspace_MapsStatusWhenErrorBodyIsNotStructured(t *testing.T) {
 }
 
 func TestImportWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
-	client := New("https://adapter.local")
-	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/internal/workspaces/import" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		return jsonResponse(http.StatusAccepted, map[string]string{
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"workspace_id": "11111111-1111-1111-1111-111111111111",
 			"status":       "accepted",
-		}), nil
-	})
+		})
+	}))
+	defer srv.Close()
 
+	client := New(srv.URL)
 	_, err := client.ImportWorkspace(context.Background(), ImportRequest{RepoURL: "https://github.com/org/repo"})
 	if err == nil {
 		t.Fatal("expected error for async accepted-only import")
@@ -127,13 +136,16 @@ func TestImportWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
 }
 
 func TestSyncWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
-	client := New("https://adapter.local")
-	client.httpClient.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/internal/workspaces/11111111-1111-1111-1111-111111111111/sync" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		return jsonResponse(http.StatusAccepted, map[string]string{"status": "accepted"}), nil
-	})
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "accepted"})
+	}))
+	defer srv.Close()
+
+	client := New(srv.URL)
 	err := client.SyncWorkspace(context.Background(), "11111111-1111-1111-1111-111111111111")
 	if err == nil {
 		t.Fatal("expected error for async accepted-only sync")
@@ -145,31 +157,5 @@ func TestSyncWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
 	}
 	if se.Code != domain.ErrAdapterInternal {
 		t.Errorf("expected %s, got %s", domain.ErrAdapterInternal, se.Code)
-	}
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
-}
-
-func jsonResponse[T any](status int, body T) *http.Response {
-	data, err := json.Marshal(body)
-	if err != nil {
-		panic(err)
-	}
-	return &http.Response{
-		StatusCode: status,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(bytes.NewReader(data)),
-	}
-}
-
-func textResponse(status int, body string) *http.Response {
-	return &http.Response{
-		StatusCode: status,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
