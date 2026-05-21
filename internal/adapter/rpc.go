@@ -36,13 +36,13 @@ type ImportRequest struct {
 	Name          string `json:"name,omitempty"`
 }
 
-// ImportResponse is the response from adapter-service after an import has been persisted.
+// ImportResponse is the response from adapter-service after an import is accepted or found.
 type ImportResponse struct {
 	WorkspaceID string `json:"workspace_id"`
 }
 
 // ImportWorkspace calls POST /internal/workspaces/import on adapter-service.
-// Returns the workspace ID after the adapter import/persistence path completes.
+// Returns the workspace ID once adapter-service accepts or finds the import.
 func (c *Client) ImportWorkspace(ctx context.Context, req ImportRequest) (string, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -54,8 +54,8 @@ func (c *Client) ImportWorkspace(ctx context.Context, req ImportRequest) (string
 	if err != nil {
 		return "", err
 	}
-	if statusCode != http.StatusOK {
-		return "", sourceErrorFromHTTPStatus(path, statusCode, resp)
+	if statusCode != http.StatusOK && statusCode != http.StatusAccepted {
+		return "", sourceErrorFromHTTPStatus(path, statusCode, resp) // TODO: Test
 	}
 
 	var out ImportResponse
