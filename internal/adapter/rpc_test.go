@@ -107,7 +107,7 @@ func TestImportWorkspace_MapsStatusWhenErrorBodyIsNotStructured(t *testing.T) {
 	}
 }
 
-func TestImportWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
+func TestImportWorkspace_AcceptsQueuedResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/internal/workspaces/import" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -121,17 +121,12 @@ func TestImportWorkspace_RejectsAcceptedOnlyResponse(t *testing.T) {
 	defer srv.Close()
 
 	client := New(srv.URL)
-	_, err := client.ImportWorkspace(context.Background(), ImportRequest{RepoURL: "https://github.com/org/repo"})
-	if err == nil {
-		t.Fatal("expected error for async accepted-only import")
+	workspaceID, err := client.ImportWorkspace(context.Background(), ImportRequest{RepoURL: "https://github.com/org/repo"})
+	if err != nil {
+		t.Fatalf("expected accepted queued import to succeed, got %v", err)
 	}
-
-	se, ok := err.(domain.SourceError)
-	if !ok {
-		t.Fatalf("expected SourceError, got %T", err)
-	}
-	if se.Code != domain.ErrAdapterInternal {
-		t.Errorf("expected %s, got %s", domain.ErrAdapterInternal, se.Code)
+	if workspaceID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("workspaceID = %q", workspaceID)
 	}
 }
 
