@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,9 +10,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
+	"github.com/tiendv89/workflow-backend/configs"
 	"github.com/tiendv89/workflow-backend/internal/adapter"
-	"github.com/tiendv89/workflow-backend/internal/config"
 	"github.com/tiendv89/workflow-backend/internal/database"
 	"github.com/tiendv89/workflow-backend/internal/handler"
 	"github.com/tiendv89/workflow-backend/internal/service"
@@ -45,29 +46,44 @@ func corsMiddleware() gin.HandlerFunc {
 }
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("config: %v", err)
+	cfgFile := "configs/config.yaml"
+	if v := os.Getenv("CONFIG_FILE"); v != "" {
+		cfgFile = v
 	}
+
+	cfg, err := configs.Load(cfgFile)
+	if err != nil {
+		// zerolog not initialized yet — use stderr directly
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize zerolog.
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	level, err := zerolog.ParseLevel(cfg.Log.Level)
+	if err != nil {
+		level = zerolog.InfoLevel
+	}
+	zerolog.SetGlobalLevel(level)
 
 	migCtx, migCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer migCancel()
-	if err := database.RunMigrations(migCtx, cfg.DatabaseURL); err != nil {
-		log.Fatalf("migrations: %v", err)
+	if err := database.RunMigrations(migCtx, cfg.Database.URL); err != nil {
+		log.Fatal().Err(err).Msg("migrations failed")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	pool, err := database.Connect(ctx, cfg.Database.URL)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		log.Fatal().Err(err).Msg("database connect failed")
 	}
 	defer pool.Close()
 
 	reader := database.NewReader(pool)
-	adapterClient := adapter.New(cfg.AdapterServiceURL)
-	svc := service.New(reader, adapterClient, cfg.StaleThreshold)
+	adapterClient := adapter.New(cfg.API.AdapterServiceURL)
+	svc := service.New(reader, adapterClient, cfg.StaleThreshold())
 
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
@@ -86,7 +102,7 @@ func main() {
 	h.RegisterRoutes(api)
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Port),
+		Addr:         fmt.Sprintf(":%d", cfg.API.Port),
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -97,19 +113,19 @@ func main() {
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
-		log.Printf("api-service listening on :%d", cfg.Port)
+		log.Info().Int("port", cfg.API.Port).Msg("api-service listening")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("listen: %v", err)
+			log.Fatal().Err(err).Msg("listen failed")
 		}
 	}()
 
 	<-done
-	log.Println("api-service: shutting down")
+	log.Info().Msg("api-service: shutting down")
 
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutCancel()
 
 	if err := srv.Shutdown(shutCtx); err != nil {
-		log.Printf("shutdown: %v", err)
+		log.Error().Err(err).Msg("shutdown error")
 	}
 }
