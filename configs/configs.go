@@ -6,14 +6,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+	"github.com/tiendv89/workflow-backend/pkg/db"
 )
+
+// G is the global config instance populated by Init.
+var G *Config
 
 // Config holds all runtime configuration for api-service.
 type Config struct {
-	Log      LogConfig
-	API      APIConfig
-	Database DatabaseConfig
+	Log LogConfig
+	API APIConfig
+	DB  db.Config `mapstructure:"db"`
 }
 
 // LogConfig holds logging settings.
@@ -28,9 +33,13 @@ type APIConfig struct {
 	AdapterServiceURL     string `mapstructure:"adapter_service_url"`
 }
 
-// DatabaseConfig holds database connection settings.
-type DatabaseConfig struct {
-	URL string
+// Init loads config from path into the global G variable, panicking on error.
+func Init(path string) {
+	cfg, err := Load(path)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to load config")
+	}
+	G = cfg
 }
 
 // StaleThreshold returns StaleThresholdMinutes as a time.Duration.
@@ -39,7 +48,6 @@ func (c *Config) StaleThreshold() time.Duration {
 }
 
 // Load reads config from the YAML file at path, then applies env-variable overrides.
-// Env key mapping: viper key delimiter "." → "_", e.g. DATABASE_URL overrides database.url.
 func Load(path string) (*Config, error) {
 	v := viper.New()
 	v.SetConfigFile(path)
@@ -47,7 +55,6 @@ func Load(path string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// Set defaults so the service starts with sensible values even without a config file.
 	v.SetDefault("log.level", "info")
 	v.SetDefault("api.port", 8081)
 	v.SetDefault("api.stale_threshold_minutes", 30)
@@ -62,8 +69,8 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	if cfg.Database.URL == "" {
-		return nil, fmt.Errorf("database.url is required")
+	if cfg.DB.Host == "" {
+		return nil, fmt.Errorf("db.host is required")
 	}
 	if cfg.API.Port < 1 || cfg.API.Port > 65535 {
 		return nil, fmt.Errorf("api.port must be between 1 and 65535, got %d", cfg.API.Port)

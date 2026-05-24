@@ -6,5 +6,15 @@ api:
   stale_threshold_minutes: 30
   adapter_service_url: "http://adapter-service:8080"
 
-database:
-  url: "DATABASE_URL_PLACEHOLDER"
+db:
+  host: 127.0.0.1
+  port: 25432
+  db_name: workflow_backend
+  user: workflow_backend
+  password: workflow_backend
+  conn_life_time_seconds: 300
+  max_idle_conns: 10
+  max_open_conns: 30
+  log_level: 1
+  auto_migration: true
+  migration_dir: "file://migrations"

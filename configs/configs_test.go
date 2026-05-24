@@ -29,18 +29,33 @@ func TestLoad_MissingFile(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingDatabaseURL(t *testing.T) {
+const validDBConfig = `
+db:
+  host: 127.0.0.1
+  port: 5432
+  db_name: testdb
+  user: testuser
+  password: testpass
+  conn_life_time_seconds: 300
+  max_idle_conns: 10
+  max_open_conns: 30
+  log_level: 1
+  auto_migration: false
+  migration_dir: "file://migrations"
+`
+
+func TestLoad_MissingDBHost(t *testing.T) {
 	p := writeConfigFile(t, `
 log:
   level: info
 api:
   port: 8081
-database:
-  url: ""
+db:
+  host: ""
 `)
 	_, err := configs.Load(p)
 	if err == nil {
-		t.Error("expected error when database.url is empty")
+		t.Error("expected error when db.host is empty")
 	}
 }
 
@@ -51,10 +66,7 @@ log:
 api:
   port: 9090
   stale_threshold_minutes: 60
-  adapter_service_url: "http://my-adapter:8000"
-database:
-  url: "postgresql://localhost/testdb"
-`)
+  adapter_service_url: "http://my-adapter:8000"`+validDBConfig)
 	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -71,16 +83,17 @@ database:
 	if cfg.API.AdapterServiceURL != "http://my-adapter:8000" {
 		t.Errorf("expected adapter_service_url, got %q", cfg.API.AdapterServiceURL)
 	}
-	if cfg.Database.URL != "postgresql://localhost/testdb" {
-		t.Errorf("expected database.url, got %q", cfg.Database.URL)
+	if cfg.DB.Host != "127.0.0.1" {
+		t.Errorf("expected db.host=127.0.0.1, got %q", cfg.DB.Host)
+	}
+	expectedDSN := "postgres://testuser:testpass@127.0.0.1:5432/testdb?sslmode=disable"
+	if cfg.DB.DSN() != expectedDSN {
+		t.Errorf("expected DSN %q, got %q", expectedDSN, cfg.DB.DSN())
 	}
 }
 
 func TestLoad_Defaults(t *testing.T) {
-	p := writeConfigFile(t, `
-database:
-  url: "postgresql://localhost/test"
-`)
+	p := writeConfigFile(t, validDBConfig)
 	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -100,9 +113,7 @@ database:
 }
 
 func TestLoad_InvalidPort(t *testing.T) {
-	p := writeConfigFile(t, `
-database:
-  url: "postgresql://localhost/test"
+	p := writeConfigFile(t, validDBConfig+`
 api:
   port: 99999
 `)
@@ -113,9 +124,7 @@ api:
 }
 
 func TestLoad_NegativeStaleThreshold(t *testing.T) {
-	p := writeConfigFile(t, `
-database:
-  url: "postgresql://localhost/test"
+	p := writeConfigFile(t, validDBConfig+`
 api:
   stale_threshold_minutes: -1
 `)
@@ -126,9 +135,7 @@ api:
 }
 
 func TestLoad_StaleThresholdDuration(t *testing.T) {
-	p := writeConfigFile(t, `
-database:
-  url: "postgresql://localhost/test"
+	p := writeConfigFile(t, validDBConfig+`
 api:
   stale_threshold_minutes: 45
 `)
@@ -143,16 +150,13 @@ api:
 }
 
 func TestLoad_EnvOverride(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgresql://envhost/envdb")
-	p := writeConfigFile(t, `
-database:
-  url: "postgresql://yaml-host/yaml-db"
-`)
+	t.Setenv("DB_HOST", "envhost")
+	p := writeConfigFile(t, validDBConfig)
 	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Database.URL != "postgresql://envhost/envdb" {
-		t.Errorf("expected env override, got %q", cfg.Database.URL)
+	if cfg.DB.Host != "envhost" {
+		t.Errorf("expected env override db.host=envhost, got %q", cfg.DB.Host)
 	}
 }

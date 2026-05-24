@@ -1,18 +1,19 @@
 services:
-  api-service:
-    build: .
+  db:
+    image: postgres:16-alpine
     environment:
-      DATABASE_URL: postgres://workspace_adapter:workspace_adapter@postgres:5432/workspace_adapter?sslmode=disable
-      API_ADAPTER_SERVICE_URL: http://adapter-service:8080
-      API_STALE_THRESHOLD_MINUTES: ${STALE_THRESHOLD_MINUTES:-30}
-      API_PORT: 8081
+      POSTGRES_DB: workflow_backend
+      POSTGRES_USER: workflow_backend
+      POSTGRES_PASSWORD: workflow_backend
     ports:
-      - "8081:8081"
-    networks:
-      - workspace-github-adapter
-    restart: unless-stopped
+      - "25432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workflow_backend -d workflow_backend"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-networks:
-  workspace-github-adapter:
-    external: true
-    name: workspace-github-adapter_default
+volumes:
+  db_data:

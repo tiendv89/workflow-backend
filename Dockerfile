@@ -1,24 +1,25 @@
-# syntax=docker/dockerfile:1
-FROM golang:1.25-bookworm AS build
-
-WORKDIR /src
-
+# Vendor stage
+FROM golang:1.25.5 AS dep
+WORKDIR /build
 COPY go.mod go.sum ./
-RUN go mod download
-
+RUN GO111MODULE=on go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /out/api-service ./cmd
+RUN go mod vendor
 
-# --- runtime stage ---
-FROM debian:bookworm-slim AS runtime
+# Build binary stage
+FROM golang:1.25.5 AS build
+WORKDIR /build
+COPY --from=dep /build .
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -a -installsuffix cgo -o server -tags nethttpomithttp2 ./cmd
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=build /out/api-service /usr/local/bin/api-service
-COPY --from=build /src/configs/config.yaml /configs/config.yaml
-
-EXPOSE 8081
-
-ENTRYPOINT ["api-service", "-c", "/configs/config.yaml", "api"]
+# Minimal image
+FROM alpine:latest
+WORKDIR /app
+COPY configs/config.yaml configs/config.yaml
+COPY --from=build /build/server server
+COPY migrations migrations
+RUN apk update
+RUN apk upgrade
+RUN apk add ca-certificates
+RUN apk --no-cache add tzdata
+CMD ["./server"]

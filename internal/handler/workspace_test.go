@@ -10,9 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-
 	"github.com/tiendv89/workflow-backend/internal/adapter"
-	"github.com/tiendv89/workflow-backend/internal/database"
+	database2 "github.com/tiendv89/workflow-backend/internal/database"
 	"github.com/tiendv89/workflow-backend/internal/domain"
 	"github.com/tiendv89/workflow-backend/internal/handler"
 	"github.com/tiendv89/workflow-backend/internal/service"
@@ -25,67 +24,67 @@ const handlerTestTaskRowID = "44444444-4444-4444-4444-444444444444"
 // --- fakes (identical pattern to service tests) ---
 
 type fakeDB struct {
-	workspaces []database.Workspace
-	syncRuns   []database.WorkspaceSyncRun
-	features   []database.WorkspaceFeature
-	documents  []database.WorkspaceFeatureDocument
-	tasks      []database.WorkspaceTask
-	activity   []database.WorkspaceActivityEvent
-	githubSrcs map[string]database.WorkspaceGitHubSource
+	workspaces []database2.Workspace
+	syncRuns   []database2.WorkspaceSyncRun
+	features   []database2.WorkspaceFeature
+	documents  []database2.WorkspaceFeatureDocument
+	tasks      []database2.WorkspaceTask
+	activity   []database2.WorkspaceActivityEvent
+	githubSrcs map[string]database2.WorkspaceGitHubSource
 }
 
-func (f *fakeDB) ListWorkspaces(_ context.Context) ([]database.Workspace, error) {
+func (f *fakeDB) ListWorkspaces(_ context.Context) ([]database2.Workspace, error) {
 	return f.workspaces, nil
 }
-func (f *fakeDB) GetWorkspace(_ context.Context, workspaceID string) (database.Workspace, error) {
+func (f *fakeDB) GetWorkspace(_ context.Context, workspaceID string) (database2.Workspace, error) {
 	for _, w := range f.workspaces {
-		if database.UUIDString(w.ID) == workspaceID {
+		if database2.UUIDString(w.ID) == workspaceID {
 			return w, nil
 		}
 	}
-	return database.Workspace{}, database.ErrNotFound
+	return database2.Workspace{}, database2.ErrNotFound
 }
-func (f *fakeDB) GetGitHubSource(_ context.Context, workspaceID string) (database.WorkspaceGitHubSource, error) {
+func (f *fakeDB) GetGitHubSource(_ context.Context, workspaceID string) (database2.WorkspaceGitHubSource, error) {
 	if f.githubSrcs != nil {
 		if src, ok := f.githubSrcs[workspaceID]; ok {
 			return src, nil
 		}
 	}
-	return database.WorkspaceGitHubSource{}, database.ErrNotFound
+	return database2.WorkspaceGitHubSource{}, database2.ErrNotFound
 }
-func (f *fakeDB) ListGitHubSources(_ context.Context) ([]database.WorkspaceGitHubSource, error) {
-	out := make([]database.WorkspaceGitHubSource, 0, len(f.githubSrcs))
+func (f *fakeDB) ListGitHubSources(_ context.Context) ([]database2.WorkspaceGitHubSource, error) {
+	out := make([]database2.WorkspaceGitHubSource, 0, len(f.githubSrcs))
 	for _, src := range f.githubSrcs {
 		out = append(out, src)
 	}
 	return out, nil
 }
-func (f *fakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database.WorkspaceSyncRun, error) {
+func (f *fakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database2.WorkspaceSyncRun, error) {
 	return f.syncRuns, nil
 }
-func (f *fakeDB) GetLatestSyncRun(_ context.Context, _ string) (database.WorkspaceSyncRun, error) {
+func (f *fakeDB) GetLatestSyncRun(_ context.Context, _ string) (database2.WorkspaceSyncRun, error) {
 	if len(f.syncRuns) > 0 {
 		return f.syncRuns[0], nil
 	}
-	return database.WorkspaceSyncRun{}, database.ErrNotFound
+	return database2.WorkspaceSyncRun{}, database2.ErrNotFound
 }
-func (f *fakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database.WorkspaceFeature, error) {
+func (f *fakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database2.WorkspaceFeature, error) {
 	return f.features, nil
 }
-func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) ([]database.WorkspaceFeature, error) {
+func (f *fakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, _ database2.FeatureSearchFilters) ([]database2.WorkspaceFeature, error) {
 	return f.features, nil
 }
-func (f *fakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error) {
-	counts := make(map[string]database.WorkspaceFeatureTaskCounts, len(featureIDs))
+func (f *fakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs []string) ([]database2.WorkspaceFeatureTaskCounts, error) {
+	counts := make(map[string]database2.WorkspaceFeatureTaskCounts, len(featureIDs))
 	for _, featureID := range featureIDs {
-		var row database.WorkspaceFeatureTaskCounts
+		var row database2.WorkspaceFeatureTaskCounts
 		if err := row.FeatureID.Scan(featureID); err != nil {
 			return nil, err
 		}
 		counts[featureID] = row
 	}
 	for _, task := range f.tasks {
-		featureID := database.UUIDString(task.FeatureID)
+		featureID := database2.UUIDString(task.FeatureID)
 		row, ok := counts[featureID]
 		if !ok {
 			continue
@@ -107,36 +106,36 @@ func (f *fakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs [
 		}
 		counts[featureID] = row
 	}
-	out := make([]database.WorkspaceFeatureTaskCounts, 0, len(featureIDs))
+	out := make([]database2.WorkspaceFeatureTaskCounts, 0, len(featureIDs))
 	for _, featureID := range featureIDs {
 		out = append(out, counts[featureID])
 	}
 	return out, nil
 }
-func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
+func (f *fakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database2.WorkspaceFeature, error) {
 	for _, feat := range f.features {
-		if database.UUIDString(feat.FeatureID) == featureID {
+		if database2.UUIDString(feat.FeatureID) == featureID {
 			return feat, nil
 		}
 	}
-	return database.WorkspaceFeature{}, database.ErrNotFound
+	return database2.WorkspaceFeature{}, database2.ErrNotFound
 }
-func (f *fakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]database.WorkspaceFeatureDocument, error) {
+func (f *fakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]database2.WorkspaceFeatureDocument, error) {
 	return f.documents, nil
 }
-func (f *fakeDB) ListFeatureTasks(_ context.Context, _, featureID string) ([]database.WorkspaceTask, error) {
-	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+func (f *fakeDB) ListFeatureTasks(_ context.Context, _, featureID string) ([]database2.WorkspaceTask, error) {
+	out := make([]database2.WorkspaceTask, 0, len(f.tasks))
 	for _, task := range f.tasks {
-		if database.UUIDString(task.FeatureID) == featureID {
+		if database2.UUIDString(task.FeatureID) == featureID {
 			out = append(out, task)
 		}
 	}
 	return out, nil
 }
-func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
-	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filters database2.TaskSearchFilters) ([]database2.WorkspaceTask, error) {
+	out := make([]database2.WorkspaceTask, 0, len(f.tasks))
 	for _, task := range f.tasks {
-		if database.UUIDString(task.FeatureID) != featureID {
+		if database2.UUIDString(task.FeatureID) != featureID {
 			continue
 		}
 		if filters.Title != "" && task.Title != filters.Title {
@@ -152,8 +151,8 @@ func (f *fakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filt
 	}
 	return out, nil
 }
-func (f *fakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
-	out := make([]database.WorkspaceTask, 0, len(f.tasks))
+func (f *fakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters database2.TaskSearchFilters) ([]database2.WorkspaceTask, error) {
+	out := make([]database2.WorkspaceTask, 0, len(f.tasks))
 	for _, task := range f.tasks {
 		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
 			continue
@@ -174,47 +173,47 @@ func (f *fakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters datab
 	}
 	return out, nil
 }
-func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
+func (f *fakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database2.WorkspaceTask, error) {
 	return f.tasks, nil
 }
 
-func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
+func (f *fakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database2.WorkspaceTask, error) {
 	for _, t := range f.tasks {
-		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.TaskID) == taskID {
+		if database2.UUIDString(t.FeatureID) == featureID && database2.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
-	return database.WorkspaceTask{}, database.ErrNotFound
+	return database2.WorkspaceTask{}, database2.ErrNotFound
 }
 
-func (f *fakeDB) GetWorkspaceTaskByID(_ context.Context, workspaceID, taskID string) (database.WorkspaceTask, error) {
+func (f *fakeDB) GetWorkspaceTaskByID(_ context.Context, workspaceID, taskID string) (database2.WorkspaceTask, error) {
 	for _, t := range f.tasks {
-		if database.UUIDString(t.WorkspaceID) == workspaceID && database.UUIDString(t.TaskID) == taskID {
+		if database2.UUIDString(t.WorkspaceID) == workspaceID && database2.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
-	return database.WorkspaceTask{}, database.ErrNotFound
+	return database2.WorkspaceTask{}, database2.ErrNotFound
 }
 
-func (f *fakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]database.WorkspaceActivityEvent, error) {
+func (f *fakeDB) ListActivityEvents(_ context.Context, _, _, _ string) ([]database2.WorkspaceActivityEvent, error) {
 	return f.activity, nil
 }
 
-func (f *fakeDB) CountWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) (int, error) {
+func (f *fakeDB) CountWorkspaceFeatures(_ context.Context, _ string, _ database2.FeatureSearchFilters) (int, error) {
 	return len(f.features), nil
 }
 
-func (f *fakeDB) CountFeatureTasks(_ context.Context, _, featureID string, _ database.TaskSearchFilters) (int, error) {
+func (f *fakeDB) CountFeatureTasks(_ context.Context, _, featureID string, _ database2.TaskSearchFilters) (int, error) {
 	count := 0
 	for _, t := range f.tasks {
-		if database.UUIDString(t.FeatureID) == featureID {
+		if database2.UUIDString(t.FeatureID) == featureID {
 			count++
 		}
 	}
 	return count, nil
 }
 
-func (f *fakeDB) CountWorkspaceTasks(_ context.Context, _ string, _ database.TaskSearchFilters) (int, error) {
+func (f *fakeDB) CountWorkspaceTasks(_ context.Context, _ string, _ database2.TaskSearchFilters) (int, error) {
 	return len(f.tasks), nil
 }
 
@@ -233,8 +232,8 @@ func (f *fakeAdapter) SyncWorkspace(_ context.Context, _ string) error {
 
 // --- setup helpers ---
 
-func makeTestWorkspace() database.Workspace {
-	var ws database.Workspace
+func makeTestWorkspace() database2.Workspace {
+	var ws database2.Workspace
 	_ = ws.ID.Scan(handlerTestWSID)
 	ws.Name = "Test Workspace"
 	ws.Slug = "test-workspace"
@@ -242,8 +241,8 @@ func makeTestWorkspace() database.Workspace {
 	return ws
 }
 
-func makeSuccessfulSyncRun(workspaceID string) database.WorkspaceSyncRun {
-	var run database.WorkspaceSyncRun
+func makeSuccessfulSyncRun(workspaceID string) database2.WorkspaceSyncRun {
+	var run database2.WorkspaceSyncRun
 	_ = run.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 	_ = run.WorkspaceID.Scan(workspaceID)
 	run.Trigger = "api_import"
@@ -315,7 +314,7 @@ func decodeAPIError(t *testing.T, body []byte) testAPIError {
 
 func TestListWorkspaces_200(t *testing.T) {
 	ws := makeTestWorkspace()
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{workspaces: []database2.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
@@ -334,7 +333,7 @@ func TestListWorkspaces_200(t *testing.T) {
 
 func TestPublicResponseEnvelope_SuccessAndError(t *testing.T) {
 	ws := makeTestWorkspace()
-	r := newTestRouter(&fakeDB{workspaces: []database.Workspace{ws}}, &fakeAdapter{})
+	r := newTestRouter(&fakeDB{workspaces: []database2.Workspace{ws}}, &fakeAdapter{})
 
 	successRecorder := httptest.NewRecorder()
 	successReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces", nil)
@@ -397,7 +396,7 @@ func TestPublicResponseEnvelope_SuccessAndError(t *testing.T) {
 
 func TestGetWorkspace_200(t *testing.T) {
 	ws := makeTestWorkspace()
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{workspaces: []database2.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
@@ -437,7 +436,7 @@ func TestGetWorkspace_404(t *testing.T) {
 
 func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
 	ws := makeTestWorkspace()
-	feat := database.WorkspaceFeature{
+	feat := database2.WorkspaceFeature{
 		FeatureName: "workspace-data-backend",
 		Title:       "Workspace Data Backend",
 	}
@@ -445,13 +444,13 @@ func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
 	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
 	_ = feat.WorkspaceID.Scan(handlerTestWSID)
 	_ = feat.UpdatedAt.Scan(time.Now())
-	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
+	src := database2.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
 	_ = src.WorkspaceID.Scan(handlerTestWSID)
 	db := &fakeDB{
-		workspaces: []database.Workspace{ws},
-		syncRuns:   []database.WorkspaceSyncRun{makeSuccessfulSyncRun(handlerTestWSID)},
-		features:   []database.WorkspaceFeature{feat},
-		githubSrcs: map[string]database.WorkspaceGitHubSource{
+		workspaces: []database2.Workspace{ws},
+		syncRuns:   []database2.WorkspaceSyncRun{makeSuccessfulSyncRun(handlerTestWSID)},
+		features:   []database2.WorkspaceFeature{feat},
+		githubSrcs: map[string]database2.WorkspaceGitHubSource{
 			handlerTestWSID: src,
 		},
 	}
@@ -514,7 +513,7 @@ func TestImportWorkspace_AdapterError(t *testing.T) {
 
 func TestSyncWorkspace_200_Success(t *testing.T) {
 	ws := makeTestWorkspace()
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{workspaces: []database2.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
@@ -528,7 +527,7 @@ func TestSyncWorkspace_200_Success(t *testing.T) {
 
 func TestSyncWorkspace_200_StaleOnAdapterFailure(t *testing.T) {
 	ws := makeTestWorkspace()
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{workspaces: []database2.Workspace{ws}}
 	syncErr := domain.NewAdapterError(domain.ErrAdapterTimeout, "timeout")
 	r := newTestRouter(db, &fakeAdapter{syncErr: syncErr})
 
@@ -549,7 +548,7 @@ func TestSyncWorkspace_200_StaleOnAdapterFailure(t *testing.T) {
 func TestGetFeature_200(t *testing.T) {
 	ws := makeTestWorkspace()
 	status := "in_design"
-	feat := database.WorkspaceFeature{
+	feat := database2.WorkspaceFeature{
 		FeatureName:   "feature-1",
 		Title:         "My Feature",
 		FeatureStatus: &status,
@@ -560,8 +559,8 @@ func TestGetFeature_200(t *testing.T) {
 	_ = feat.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
-		workspaces: []database.Workspace{ws},
-		features:   []database.WorkspaceFeature{feat},
+		workspaces: []database2.Workspace{ws},
+		features:   []database2.WorkspaceFeature{feat},
 	}
 	r := newTestRouter(db, &fakeAdapter{})
 
@@ -576,7 +575,7 @@ func TestGetFeature_200(t *testing.T) {
 
 func TestGetFeature_404(t *testing.T) {
 	ws := makeTestWorkspace()
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{workspaces: []database2.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
@@ -591,7 +590,7 @@ func TestGetFeature_404(t *testing.T) {
 func TestListFeatureTasks_200(t *testing.T) {
 	ws := makeTestWorkspace()
 	status := "ready"
-	feat := database.WorkspaceFeature{
+	feat := database2.WorkspaceFeature{
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
@@ -599,7 +598,7 @@ func TestListFeatureTasks_200(t *testing.T) {
 	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
 	_ = feat.WorkspaceID.Scan(handlerTestWSID)
 	_ = feat.UpdatedAt.Scan(time.Now())
-	task := database.WorkspaceTask{
+	task := database2.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
 		Title:       "Task One",
@@ -612,9 +611,9 @@ func TestListFeatureTasks_200(t *testing.T) {
 	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
-		workspaces: []database.Workspace{ws},
-		features:   []database.WorkspaceFeature{feat},
-		tasks:      []database.WorkspaceTask{task},
+		workspaces: []database2.Workspace{ws},
+		features:   []database2.WorkspaceFeature{feat},
+		tasks:      []database2.WorkspaceTask{task},
 	}
 	r := newTestRouter(db, &fakeAdapter{})
 
@@ -635,7 +634,7 @@ func TestListFeatureTasks_200(t *testing.T) {
 func TestGetTask_200(t *testing.T) {
 	ws := makeTestWorkspace()
 	status := "in_progress"
-	feat := database.WorkspaceFeature{
+	feat := database2.WorkspaceFeature{
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
@@ -643,7 +642,7 @@ func TestGetTask_200(t *testing.T) {
 	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
 	_ = feat.WorkspaceID.Scan(handlerTestWSID)
 	_ = feat.UpdatedAt.Scan(time.Now())
-	task := database.WorkspaceTask{
+	task := database2.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
 		Title:       "Task One",
@@ -658,9 +657,9 @@ func TestGetTask_200(t *testing.T) {
 	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
-		workspaces: []database.Workspace{ws},
-		features:   []database.WorkspaceFeature{feat},
-		tasks:      []database.WorkspaceTask{task},
+		workspaces: []database2.Workspace{ws},
+		features:   []database2.WorkspaceFeature{feat},
+		tasks:      []database2.WorkspaceTask{task},
 	}
 	r := newTestRouter(db, &fakeAdapter{})
 
@@ -676,7 +675,7 @@ func TestGetTask_200(t *testing.T) {
 func TestGetWorkspaceTask_200(t *testing.T) {
 	ws := makeTestWorkspace()
 	status := "in_progress"
-	feat := database.WorkspaceFeature{
+	feat := database2.WorkspaceFeature{
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
@@ -684,7 +683,7 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
 	_ = feat.WorkspaceID.Scan(handlerTestWSID)
 	_ = feat.UpdatedAt.Scan(time.Now())
-	task := database.WorkspaceTask{
+	task := database2.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
 		Title:       "Task One",
@@ -699,9 +698,9 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
-		workspaces: []database.Workspace{ws},
-		features:   []database.WorkspaceFeature{feat},
-		tasks:      []database.WorkspaceTask{task},
+		workspaces: []database2.Workspace{ws},
+		features:   []database2.WorkspaceFeature{feat},
+		tasks:      []database2.WorkspaceTask{task},
 	}
 	r := newTestRouter(db, &fakeAdapter{})
 
@@ -723,7 +722,7 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 
 func TestGetTask_404(t *testing.T) {
 	ws := makeTestWorkspace()
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{workspaces: []database2.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
@@ -737,7 +736,7 @@ func TestGetTask_404(t *testing.T) {
 
 func TestListActivity_200(t *testing.T) {
 	ws := makeTestWorkspace()
-	db := &fakeDB{workspaces: []database.Workspace{ws}}
+	db := &fakeDB{workspaces: []database2.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()

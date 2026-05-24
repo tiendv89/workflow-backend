@@ -12,15 +12,15 @@ import (
 	"time"
 
 	"github.com/tiendv89/workflow-backend/internal/adapter"
-	"github.com/tiendv89/workflow-backend/internal/database"
+	database2 "github.com/tiendv89/workflow-backend/internal/database"
 )
 
 // FixedTime is a deterministic timestamp for test fixtures.
 var FixedTime = time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
 // NewWorkspace creates a fake Workspace row with the given ID and name.
-func NewWorkspace(id, name, slug string) database.Workspace {
-	var ws database.Workspace
+func NewWorkspace(id, name, slug string) database2.Workspace {
+	var ws database2.Workspace
 	if err := ws.ID.Scan(id); err != nil {
 		panic(fmt.Sprintf("testhelpers.NewWorkspace: invalid UUID %q: %v", id, err))
 	}
@@ -37,8 +37,8 @@ func NewWorkspace(id, name, slug string) database.Workspace {
 }
 
 // NewGitHubSource creates a fake WorkspaceGitHubSource for the given workspace.
-func NewGitHubSource(workspaceID, repoURL string) database.WorkspaceGitHubSource {
-	var src database.WorkspaceGitHubSource
+func NewGitHubSource(workspaceID, repoURL string) database2.WorkspaceGitHubSource {
+	var src database2.WorkspaceGitHubSource
 	if err := src.WorkspaceID.Scan(workspaceID); err != nil {
 		panic(err)
 	}
@@ -57,8 +57,8 @@ func NewGitHubSource(workspaceID, repoURL string) database.WorkspaceGitHubSource
 }
 
 // NewSyncRun creates a fake WorkspaceSyncRun row.
-func NewSyncRun(workspaceID, trigger, mode, status string) database.WorkspaceSyncRun {
-	var sr database.WorkspaceSyncRun
+func NewSyncRun(workspaceID, trigger, mode, status string) database2.WorkspaceSyncRun {
+	var sr database2.WorkspaceSyncRun
 	if err := sr.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"); err != nil {
 		panic(err)
 	}
@@ -79,8 +79,8 @@ func NewSyncRun(workspaceID, trigger, mode, status string) database.WorkspaceSyn
 }
 
 // NewFeature creates a fake WorkspaceFeature row.
-func NewFeature(workspaceID, featureID, title, status, stage string) database.WorkspaceFeature {
-	var f database.WorkspaceFeature
+func NewFeature(workspaceID, featureID, title, status, stage string) database2.WorkspaceFeature {
+	var f database2.WorkspaceFeature
 	if err := f.ID.Scan("10101010-1010-1010-1010-101010101010"); err != nil {
 		panic(err)
 	}
@@ -107,8 +107,8 @@ func NewFeature(workspaceID, featureID, title, status, stage string) database.Wo
 }
 
 // NewDocument creates a fake WorkspaceFeatureDocument row.
-func NewDocument(workspaceID, featureID, docType, sourcePath, url string) database.WorkspaceFeatureDocument {
-	var d database.WorkspaceFeatureDocument
+func NewDocument(workspaceID, featureID, docType, sourcePath, url string) database2.WorkspaceFeatureDocument {
+	var d database2.WorkspaceFeatureDocument
 	if err := d.ID.Scan("cccccccc-cccc-cccc-cccc-cccccccccccc"); err != nil {
 		panic(err)
 	}
@@ -132,8 +132,8 @@ func NewDocument(workspaceID, featureID, docType, sourcePath, url string) databa
 }
 
 // NewTask creates a fake WorkspaceTask row.
-func NewTask(workspaceID, featureID, taskID, title, status string, dependsOn []string) database.WorkspaceTask {
-	var t database.WorkspaceTask
+func NewTask(workspaceID, featureID, taskID, title, status string, dependsOn []string) database2.WorkspaceTask {
+	var t database2.WorkspaceTask
 	if err := t.ID.Scan("20202020-2020-2020-2020-202020202020"); err != nil {
 		panic(err)
 	}
@@ -176,8 +176,8 @@ func NewTask(workspaceID, featureID, taskID, title, status string, dependsOn []s
 }
 
 // NewActivityEvent creates a fake WorkspaceActivityEvent row.
-func NewActivityEvent(workspaceID, featureID, taskID, action, actor, note string, seq int32) database.WorkspaceActivityEvent {
-	var e database.WorkspaceActivityEvent
+func NewActivityEvent(workspaceID, featureID, taskID, action, actor, note string, seq int32) database2.WorkspaceActivityEvent {
+	var e database2.WorkspaceActivityEvent
 	if err := e.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"); err != nil {
 		panic(err)
 	}
@@ -212,13 +212,13 @@ func NewActivityEvent(workspaceID, featureID, taskID, action, actor, note string
 
 // FakeDB is a configurable in-memory fake of the DatabaseReader interface.
 type FakeDB struct {
-	Workspaces []database.Workspace
-	SyncRuns   []database.WorkspaceSyncRun
-	Features   []database.WorkspaceFeature
-	Documents  []database.WorkspaceFeatureDocument
-	Tasks      []database.WorkspaceTask
-	Activity   []database.WorkspaceActivityEvent
-	GitHubSrcs map[string]database.WorkspaceGitHubSource
+	Workspaces []database2.Workspace
+	SyncRuns   []database2.WorkspaceSyncRun
+	Features   []database2.WorkspaceFeature
+	Documents  []database2.WorkspaceFeatureDocument
+	Tasks      []database2.WorkspaceTask
+	Activity   []database2.WorkspaceActivityEvent
+	GitHubSrcs map[string]database2.WorkspaceGitHubSource
 
 	// Error injection hooks.
 	ListWorkspacesErr error
@@ -226,62 +226,62 @@ type FakeDB struct {
 	GetSyncRunErr     error
 }
 
-func (f *FakeDB) ListWorkspaces(_ context.Context) ([]database.Workspace, error) {
+func (f *FakeDB) ListWorkspaces(_ context.Context) ([]database2.Workspace, error) {
 	if f.ListWorkspacesErr != nil {
 		return nil, f.ListWorkspacesErr
 	}
 	return f.Workspaces, nil
 }
 
-func (f *FakeDB) GetWorkspace(_ context.Context, workspaceID string) (database.Workspace, error) {
+func (f *FakeDB) GetWorkspace(_ context.Context, workspaceID string) (database2.Workspace, error) {
 	if f.GetWorkspaceErr != nil {
-		return database.Workspace{}, f.GetWorkspaceErr
+		return database2.Workspace{}, f.GetWorkspaceErr
 	}
 	for _, w := range f.Workspaces {
-		if database.UUIDString(w.ID) == workspaceID {
+		if database2.UUIDString(w.ID) == workspaceID {
 			return w, nil
 		}
 	}
-	return database.Workspace{}, database.ErrNotFound
+	return database2.Workspace{}, database2.ErrNotFound
 }
 
-func (f *FakeDB) GetGitHubSource(_ context.Context, workspaceID string) (database.WorkspaceGitHubSource, error) {
+func (f *FakeDB) GetGitHubSource(_ context.Context, workspaceID string) (database2.WorkspaceGitHubSource, error) {
 	if f.GitHubSrcs != nil {
 		if src, ok := f.GitHubSrcs[workspaceID]; ok {
 			return src, nil
 		}
 	}
-	return database.WorkspaceGitHubSource{}, database.ErrNotFound
+	return database2.WorkspaceGitHubSource{}, database2.ErrNotFound
 }
 
-func (f *FakeDB) ListGitHubSources(_ context.Context) ([]database.WorkspaceGitHubSource, error) {
-	out := make([]database.WorkspaceGitHubSource, 0, len(f.GitHubSrcs))
+func (f *FakeDB) ListGitHubSources(_ context.Context) ([]database2.WorkspaceGitHubSource, error) {
+	out := make([]database2.WorkspaceGitHubSource, 0, len(f.GitHubSrcs))
 	for _, src := range f.GitHubSrcs {
 		out = append(out, src)
 	}
 	return out, nil
 }
 
-func (f *FakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database.WorkspaceSyncRun, error) {
+func (f *FakeDB) ListLatestSyncRunsPerWorkspace(_ context.Context) ([]database2.WorkspaceSyncRun, error) {
 	return f.SyncRuns, nil
 }
 
-func (f *FakeDB) GetLatestSyncRun(_ context.Context, _ string) (database.WorkspaceSyncRun, error) {
+func (f *FakeDB) GetLatestSyncRun(_ context.Context, _ string) (database2.WorkspaceSyncRun, error) {
 	if f.GetSyncRunErr != nil {
-		return database.WorkspaceSyncRun{}, f.GetSyncRunErr
+		return database2.WorkspaceSyncRun{}, f.GetSyncRunErr
 	}
 	if len(f.SyncRuns) > 0 {
 		return f.SyncRuns[0], nil
 	}
-	return database.WorkspaceSyncRun{}, database.ErrNotFound
+	return database2.WorkspaceSyncRun{}, database2.ErrNotFound
 }
 
-func (f *FakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database.WorkspaceFeature, error) {
+func (f *FakeDB) ListWorkspaceFeatures(_ context.Context, _ string) ([]database2.WorkspaceFeature, error) {
 	return f.Features, nil
 }
 
-func (f *FakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, filters database.FeatureSearchFilters) ([]database.WorkspaceFeature, error) {
-	out := make([]database.WorkspaceFeature, 0, len(f.Features))
+func (f *FakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, filters database2.FeatureSearchFilters) ([]database2.WorkspaceFeature, error) {
+	out := make([]database2.WorkspaceFeature, 0, len(f.Features))
 	for _, feature := range f.Features {
 		if filters.Title != "" && !strings.Contains(strings.ToLower(feature.Title), strings.ToLower(filters.Title)) {
 			continue
@@ -315,10 +315,10 @@ func (f *FakeDB) SearchWorkspaceFeatures(_ context.Context, _ string, filters da
 	return paginateFeatures(out, filters.Page, filters.Limit), nil
 }
 
-func (f *FakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error) {
-	counts := make(map[string]database.WorkspaceFeatureTaskCounts, len(featureIDs))
+func (f *FakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs []string) ([]database2.WorkspaceFeatureTaskCounts, error) {
+	counts := make(map[string]database2.WorkspaceFeatureTaskCounts, len(featureIDs))
 	for _, featureID := range featureIDs {
-		var row database.WorkspaceFeatureTaskCounts
+		var row database2.WorkspaceFeatureTaskCounts
 		if err := row.FeatureID.Scan(featureID); err != nil {
 			return nil, err
 		}
@@ -326,7 +326,7 @@ func (f *FakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs [
 	}
 
 	for _, task := range f.Tasks {
-		featureID := database.UUIDString(task.FeatureID)
+		featureID := database2.UUIDString(task.FeatureID)
 		row, ok := counts[featureID]
 		if !ok {
 			continue
@@ -349,40 +349,40 @@ func (f *FakeDB) ListFeatureTaskCounts(_ context.Context, _ string, featureIDs [
 		counts[featureID] = row
 	}
 
-	out := make([]database.WorkspaceFeatureTaskCounts, 0, len(featureIDs))
+	out := make([]database2.WorkspaceFeatureTaskCounts, 0, len(featureIDs))
 	for _, featureID := range featureIDs {
 		out = append(out, counts[featureID])
 	}
 	return out, nil
 }
 
-func (f *FakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database.WorkspaceFeature, error) {
+func (f *FakeDB) GetWorkspaceFeature(_ context.Context, _, featureID string) (database2.WorkspaceFeature, error) {
 	for _, feat := range f.Features {
-		if database.UUIDString(feat.FeatureID) == featureID {
+		if database2.UUIDString(feat.FeatureID) == featureID {
 			return feat, nil
 		}
 	}
-	return database.WorkspaceFeature{}, database.ErrNotFound
+	return database2.WorkspaceFeature{}, database2.ErrNotFound
 }
 
-func (f *FakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]database.WorkspaceFeatureDocument, error) {
+func (f *FakeDB) ListFeatureDocuments(_ context.Context, _, _ string) ([]database2.WorkspaceFeatureDocument, error) {
 	return f.Documents, nil
 }
 
-func (f *FakeDB) ListFeatureTasks(_ context.Context, _, featureID string) ([]database.WorkspaceTask, error) {
-	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
+func (f *FakeDB) ListFeatureTasks(_ context.Context, _, featureID string) ([]database2.WorkspaceTask, error) {
+	out := make([]database2.WorkspaceTask, 0, len(f.Tasks))
 	for _, task := range f.Tasks {
-		if database.UUIDString(task.FeatureID) == featureID {
+		if database2.UUIDString(task.FeatureID) == featureID {
 			out = append(out, task)
 		}
 	}
 	return out, nil
 }
 
-func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
-	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
+func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filters database2.TaskSearchFilters) ([]database2.WorkspaceTask, error) {
+	out := make([]database2.WorkspaceTask, 0, len(f.Tasks))
 	for _, task := range f.Tasks {
-		if database.UUIDString(task.FeatureID) != featureID {
+		if database2.UUIDString(task.FeatureID) != featureID {
 			continue
 		}
 		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
@@ -431,8 +431,8 @@ func (f *FakeDB) SearchFeatureTasks(_ context.Context, _, featureID string, filt
 	return paginateTasks(out, filters.Page, filters.Limit), nil
 }
 
-func (f *FakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error) {
-	out := make([]database.WorkspaceTask, 0, len(f.Tasks))
+func (f *FakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters database2.TaskSearchFilters) ([]database2.WorkspaceTask, error) {
+	out := make([]database2.WorkspaceTask, 0, len(f.Tasks))
 	for _, task := range f.Tasks {
 		if filters.TaskID != "" && !strings.Contains(strings.ToLower(task.TaskName), strings.ToLower(filters.TaskID)) {
 			continue
@@ -480,17 +480,17 @@ func (f *FakeDB) SearchWorkspaceTasks(_ context.Context, _ string, filters datab
 	return paginateTasks(out, filters.Page, filters.Limit), nil
 }
 
-func (f *FakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database.WorkspaceTask, error) {
+func (f *FakeDB) ListWorkspaceTasks(_ context.Context, _ string) ([]database2.WorkspaceTask, error) {
 	return f.Tasks, nil
 }
 
-func paginateFeatures(features []database.WorkspaceFeature, page, limit int) []database.WorkspaceFeature {
+func paginateFeatures(features []database2.WorkspaceFeature, page, limit int) []database2.WorkspaceFeature {
 	if limit <= 0 {
 		return features
 	}
 	start := pageOffset(page, limit)
 	if start >= len(features) {
-		return []database.WorkspaceFeature{}
+		return []database2.WorkspaceFeature{}
 	}
 	end := start + limit
 	if end > len(features) {
@@ -499,13 +499,13 @@ func paginateFeatures(features []database.WorkspaceFeature, page, limit int) []d
 	return features[start:end]
 }
 
-func paginateTasks(tasks []database.WorkspaceTask, page, limit int) []database.WorkspaceTask {
+func paginateTasks(tasks []database2.WorkspaceTask, page, limit int) []database2.WorkspaceTask {
 	if limit <= 0 {
 		return tasks
 	}
 	start := pageOffset(page, limit)
 	if start >= len(tasks) {
-		return []database.WorkspaceTask{}
+		return []database2.WorkspaceTask{}
 	}
 	end := start + limit
 	if end > len(tasks) {
@@ -572,31 +572,31 @@ func taskNumber(taskID string) (int, bool) {
 	return n, err == nil
 }
 
-func (f *FakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database.WorkspaceTask, error) {
+func (f *FakeDB) GetWorkspaceTask(_ context.Context, _, featureID, taskID string) (database2.WorkspaceTask, error) {
 	for _, t := range f.Tasks {
-		if database.UUIDString(t.FeatureID) == featureID && database.UUIDString(t.TaskID) == taskID {
+		if database2.UUIDString(t.FeatureID) == featureID && database2.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
-	return database.WorkspaceTask{}, database.ErrNotFound
+	return database2.WorkspaceTask{}, database2.ErrNotFound
 }
 
-func (f *FakeDB) GetWorkspaceTaskByID(_ context.Context, workspaceID, taskID string) (database.WorkspaceTask, error) {
+func (f *FakeDB) GetWorkspaceTaskByID(_ context.Context, workspaceID, taskID string) (database2.WorkspaceTask, error) {
 	for _, t := range f.Tasks {
-		if database.UUIDString(t.WorkspaceID) == workspaceID && database.UUIDString(t.TaskID) == taskID {
+		if database2.UUIDString(t.WorkspaceID) == workspaceID && database2.UUIDString(t.TaskID) == taskID {
 			return t, nil
 		}
 	}
-	return database.WorkspaceTask{}, database.ErrNotFound
+	return database2.WorkspaceTask{}, database2.ErrNotFound
 }
 
-func (f *FakeDB) ListActivityEvents(_ context.Context, _, featureID, taskID string) ([]database.WorkspaceActivityEvent, error) {
-	out := make([]database.WorkspaceActivityEvent, 0, len(f.Activity))
+func (f *FakeDB) ListActivityEvents(_ context.Context, _, featureID, taskID string) ([]database2.WorkspaceActivityEvent, error) {
+	out := make([]database2.WorkspaceActivityEvent, 0, len(f.Activity))
 	for _, event := range f.Activity {
-		if featureID != "" && database.UUIDString(event.FeatureID) != featureID {
+		if featureID != "" && database2.UUIDString(event.FeatureID) != featureID {
 			continue
 		}
-		if taskID != "" && database.UUIDString(event.TaskID) != taskID {
+		if taskID != "" && database2.UUIDString(event.TaskID) != taskID {
 			continue
 		}
 		out = append(out, event)
@@ -604,21 +604,21 @@ func (f *FakeDB) ListActivityEvents(_ context.Context, _, featureID, taskID stri
 	return out, nil
 }
 
-func (f *FakeDB) CountWorkspaceFeatures(_ context.Context, _ string, _ database.FeatureSearchFilters) (int, error) {
+func (f *FakeDB) CountWorkspaceFeatures(_ context.Context, _ string, _ database2.FeatureSearchFilters) (int, error) {
 	return len(f.Features), nil
 }
 
-func (f *FakeDB) CountFeatureTasks(_ context.Context, _, featureID string, _ database.TaskSearchFilters) (int, error) {
+func (f *FakeDB) CountFeatureTasks(_ context.Context, _, featureID string, _ database2.TaskSearchFilters) (int, error) {
 	count := 0
 	for _, t := range f.Tasks {
-		if database.UUIDString(t.FeatureID) == featureID {
+		if database2.UUIDString(t.FeatureID) == featureID {
 			count++
 		}
 	}
 	return count, nil
 }
 
-func (f *FakeDB) CountWorkspaceTasks(_ context.Context, _ string, _ database.TaskSearchFilters) (int, error) {
+func (f *FakeDB) CountWorkspaceTasks(_ context.Context, _ string, _ database2.TaskSearchFilters) (int, error) {
 	return len(f.Tasks), nil
 }
 

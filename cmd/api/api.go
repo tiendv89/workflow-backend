@@ -14,7 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
-
 	"github.com/tiendv89/workflow-backend/configs"
 	"github.com/tiendv89/workflow-backend/internal/adapter"
 	apimiddleware "github.com/tiendv89/workflow-backend/internal/app/api/middleware"
@@ -29,27 +28,25 @@ var skipPaths = map[string]struct{}{
 	"/healthz": {},
 }
 
-// NewCommand returns the cobra command for the api subcommand.
-func NewCommand(cfg **configs.Config) *cobra.Command {
-	return &cobra.Command{
-		Use:   "api",
-		Short: "Start the HTTP API server",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(*cfg)
-		},
-	}
+// Command is the cobra subcommand for starting the HTTP API server.
+var Command = &cobra.Command{
+	Use:   "api",
+	Short: "Start the HTTP API server",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return run(configs.G)
+	},
 }
 
 func run(cfg *configs.Config) error {
 	migCtx, migCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	if err := database.RunMigrations(migCtx, cfg.Database.URL); err != nil {
+	if err := database.RunMigrations(migCtx, cfg.DB.DSN()); err != nil {
 		migCancel()
 		return fmt.Errorf("migrations: %w", err)
 	}
 	migCancel()
 
 	connCtx, connCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	pool, err := database.Connect(connCtx, cfg.Database.URL)
+	pool, err := database.Connect(connCtx, cfg.DB)
 	connCancel()
 	if err != nil {
 		return fmt.Errorf("database: %w", err)

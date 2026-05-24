@@ -18,6 +18,7 @@ func TestMigrationFSContainsExpectedFiles(t *testing.T) {
 		"00009_use_uuid_feature_ids_for_tasks_documents_and_activity_events.sql",
 		"00010_feature_and_task_names.sql",
 		"00011_workspace_sync_runs_uuid_refs.sql",
+		"00012_workspace_notification_settings.sql",
 	}
 
 	for _, name := range expected {
@@ -52,8 +53,8 @@ func TestMigrationFSHasExactlyElevenSQLFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk MigrationFS: %v", err)
 	}
-	if count != 11 {
-		t.Errorf("expected 11 migration files, got %d", count)
+	if count != 12 {
+		t.Errorf("expected 12 migration files, got %d", count)
 	}
 }
 

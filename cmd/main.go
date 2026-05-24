@@ -1,10 +1,12 @@
 package main
 
 import (
-	"fmt"
+	_ "net/http/pprof"
 	"os"
 
+	"github.com/fatih/color"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 
 	"github.com/tiendv89/workflow-backend/cmd/api"
@@ -12,46 +14,63 @@ import (
 	"github.com/tiendv89/workflow-backend/configs"
 )
 
-var (
-	cfgFile string
-	cfg     *configs.Config
-)
+var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:   "api-service",
-	Short: "workflow-backend API service",
-}
-
-func init() {
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "configs/config.yaml", "path to config file")
-	if err := rootCmd.MarkPersistentFlagRequired("config"); err != nil {
-		panic(err)
-	}
-
-	cobra.OnInitialize(initConfig)
-
-	rootCmd.AddCommand(api.NewCommand(&cfg))
-	rootCmd.AddCommand(migration.NewCommand(&cfg))
-}
-
-func initConfig() {
-	loaded, err := configs.Load(cfgFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "config: %v\n", err)
-		os.Exit(1)
-	}
-	cfg = loaded
-
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	level, err := zerolog.ParseLevel(cfg.Log.Level)
-	if err != nil {
-		level = zerolog.InfoLevel
-	}
-	zerolog.SetGlobalLevel(level)
+	Use:          "api-service",
+	Short:        "workflow-backend API service",
+	SilenceUsage: true,
 }
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("Engine failed to start")
+	}
+}
+
+func initLogging() {
+	logLevel, err := zerolog.ParseLevel(configs.G.Log.Level)
+	if err != nil {
+		logLevel = zerolog.DebugLevel
+	}
+	zerolog.SetGlobalLevel(logLevel)
+	zerolog.TimeFieldFormat = "2006-01-02 15:04:05.000000"
+
+	consoleWriter := zerolog.ConsoleWriter{
+		Out:        os.Stdout,
+		TimeFormat: "01-02 15:04:05.000000",
+		FormatLevel: func(i interface{}) string {
+			if lvl, ok := i.(string); ok {
+				switch lvl {
+				case "warn":
+					return color.RedString("[WARN]")
+				case "info":
+					return color.GreenString("[INFO]")
+				case "error":
+					return color.RedString("[ERROR]")
+				case "debug":
+					return color.BlueString("[DEBUG]")
+				default:
+					return color.WhiteString("[%s]", lvl)
+				}
+			}
+			return color.CyanString("[UNKNOWN]")
+		},
+	}
+
+	multiWriter := zerolog.MultiLevelWriter(consoleWriter)
+	log.Logger = zerolog.New(multiWriter).With().Timestamp().Logger()
+}
+
+func init() {
+	cobra.OnInitialize(func() { configs.Init(cfgFile) })
+	cobra.OnInitialize(initLogging)
+
+	rootCmd.AddCommand(api.Command)
+	rootCmd.AddCommand(migration.Command)
+
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file (required)")
+	if err := rootCmd.MarkFlagRequired("config"); err != nil {
+		return
 	}
 }
