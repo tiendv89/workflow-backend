@@ -1,6 +1,6 @@
 # workflow-backend
 
-Read-only REST API service for workspace management and activity tracking. It reads from a shared PostgreSQL database written to by [`workspace-github-adapter`](https://github.com/tiendv89/workspace-github-adapter) and calls that service's RPC endpoints for write operations (sync triggers, workspace imports).
+REST API service for workspace management and activity tracking. It reads from a shared PostgreSQL database and calls the [`workspace-github-adapter`](https://github.com/tiendv89/workspace-github-adapter) RPC endpoints for write operations (sync triggers, workspace imports).
 
 ## Architecture
 
@@ -13,46 +13,68 @@ Client ──► api-service ─┤  adapter (RPC calls) │
                └──── PostgreSQL ◄─┘
 ```
 
-- **api-service** — this repo; serves the REST API (port 8081 by default)
+- **api-service** — this repo; serves the REST API (port 8080 by default)
 - **adapter-service** — separate repo; syncs GitHub data into PostgreSQL
-- Shared PostgreSQL database; migrations live in the adapter repo
+- Shared PostgreSQL database; this repo owns and runs its own migrations
 
 ## Requirements
 
 - Go 1.25+
-- PostgreSQL (with migrations from `workspace-github-adapter` applied)
+- PostgreSQL
 - A running `adapter-service` instance (for sync/import endpoints)
 
 ## Configuration
 
-| Variable | Default | Description |
+Configuration is loaded from a YAML file passed via `-c <path>`. Viper maps environment variables to config keys using `_` as the separator (e.g. `DB_HOST` overrides `db.host`).
+
+| Key | Default | Description |
 |---|---|---|
-| `DATABASE_URL` | *(required)* | PostgreSQL connection string |
-| `PORT` | `8081` | HTTP listen port |
-| `ADAPTER_SERVICE_URL` | `http://adapter-service:8080` | adapter-service base URL |
-| `STALE_THRESHOLD_MINUTES` | `30` | Minutes before a workspace sync is considered stale; `0` disables |
-| `GIN_MODE` | `release` | Set to `debug` for verbose request logging |
+| `log.level` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `api.http.address` | `:8081` | HTTP listen address |
+| `api.http.mode` | `release` | Gin mode; set to `debug` for verbose request logging |
+| `api.stale_threshold_minutes` | `30` | Minutes before a workspace sync is considered stale; `0` disables |
+| `api.adapter_service_url` | `http://adapter-service:8080` | adapter-service base URL |
+| `db.host` | *(required)* | PostgreSQL host |
+| `db.port` | — | PostgreSQL port |
+| `db.db_name` | — | Database name |
+| `db.user` | — | Database user |
+| `db.password` | — | Database password |
+| `db.auto_migration` | `false` | Run migrations automatically on startup |
+| `db.migration_dir` | — | Goose migration directory (e.g. `file://migrations`) |
+| `db.max_open_conns` | — | Max open DB connections |
+| `db.max_idle_conns` | — | Max idle DB connections |
+| `db.conn_life_time_seconds` | — | Connection max lifetime in seconds |
 
-Copy `.env.example` to get started:
-
-```bash
-cp .env.example .env
-```
+See `configs/config.yaml` for a full example.
 
 ## Running locally
 
 ```bash
-# Start PostgreSQL (and optionally adapter-service) via Docker Compose
+# Start PostgreSQL via Docker Compose (binds to localhost:25432)
 docker compose up -d
 
 # Run the API service
-DATABASE_URL="postgres://workspace_adapter:workspace_adapter@localhost:5432/workspace_adapter?sslmode=disable" \
-ADAPTER_SERVICE_URL="http://localhost:8080" \
-GIN_MODE=debug \
-go run ./cmd/api-service
+go run ./cmd -c configs/config.yaml api
 ```
 
-The service starts on `http://localhost:8081`. Health check: `GET /healthz`.
+The service starts on `http://localhost:8080`. Health check: `GET /healthz`.
+
+## Migrations
+
+Migrations use [Goose](https://github.com/pressly/goose) and live in `migrations/`.
+
+```bash
+# Apply all pending migrations
+make migrate-up
+
+# Roll back the last migration
+make migrate-down-1
+
+# Create a new migration
+make new-migration NAME=<name>
+```
+
+Migrations also run automatically on startup when `db.auto_migration: true` is set in the config.
 
 ## API overview
 
@@ -62,13 +84,15 @@ All routes are prefixed with `/api`.
 |---|---|---|
 | `GET` | `/api/workspaces` | List workspaces |
 | `POST` | `/api/workspaces/import` | Import a new workspace |
-| `GET` | `/api/workspaces/:slug` | Get workspace details |
-| `POST` | `/api/workspaces/:slug/sync` | Trigger a workspace sync |
-| `GET` | `/api/workspaces/:slug/features` | List features in a workspace |
-| `GET` | `/api/workspaces/:slug/features/:featureID` | Get feature details |
-| `GET` | `/api/workspaces/:slug/features/:featureID/tasks` | List tasks in a feature |
-| `GET` | `/api/workspaces/:slug/tasks` | Search tasks in a workspace |
-| `GET` | `/api/workspaces/:slug/activity` | List workspace activity |
+| `GET` | `/api/workspaces/:workspaceId` | Get workspace details |
+| `POST` | `/api/workspaces/:workspaceId/sync` | Trigger a workspace sync |
+| `GET` | `/api/workspaces/:workspaceId/features` | Search features in a workspace |
+| `GET` | `/api/workspaces/:workspaceId/features/:featureId` | Get feature details |
+| `GET` | `/api/workspaces/:workspaceId/features/:featureId/tasks` | Search tasks in a feature |
+| `GET` | `/api/workspaces/:workspaceId/features/:featureId/tasks/:taskId` | Get a task in a feature |
+| `GET` | `/api/workspaces/:workspaceId/tasks` | Search tasks in a workspace |
+| `GET` | `/api/workspaces/:workspaceId/tasks/:taskId` | Get a task in a workspace |
+| `GET` | `/api/workspaces/:workspaceId/activity` | List workspace activity |
 | `GET` | `/healthz` | Health check |
 
 Paginated endpoints accept `?page=` and `?limit=` query parameters. Error responses include a `code`, `message`, `source`, and `retryable` flag.
@@ -79,7 +103,7 @@ See [docs/frontend-api.md](docs/frontend-api.md) for full frontend integration d
 
 ```bash
 # Unit and integration tests
-go test ./...
+make test
 
 # With a real test database (enables database reader contract tests)
 WORKFLOW_BACKEND_TEST_DATABASE_URL="postgres://..." go test -tags=integration ./internal/database/...
@@ -89,7 +113,7 @@ WORKFLOW_BACKEND_TEST_DATABASE_URL="postgres://..." go test -tags=integration ./
 
 ```bash
 # Binary
-go build -o api-service ./cmd/api-service
+go build -o server ./cmd
 
 # Docker image
 docker build -t workflow-backend:latest .
