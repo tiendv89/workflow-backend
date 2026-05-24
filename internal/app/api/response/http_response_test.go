@@ -16,10 +16,10 @@ func init() {
 	gin.SetMode(gin.TestMode)
 }
 
-func newContext(method, path string) (*gin.Context, *httptest.ResponseRecorder) {
+func newContext() (*gin.Context, *httptest.ResponseRecorder) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest(method, path, nil)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	c.Request = req
 	return c, w
 }
@@ -33,7 +33,7 @@ func newContextWithQuery(query string) (*gin.Context, *httptest.ResponseRecorder
 }
 
 func TestRespondOK(t *testing.T) {
-	c, w := newContext(http.MethodGet, "/")
+	c, w := newContext()
 	response.RespondOK(c, map[string]string{"key": "value"})
 
 	if w.Code != http.StatusOK {
@@ -52,7 +52,7 @@ func TestRespondOK(t *testing.T) {
 }
 
 func TestRespondError_NotFound(t *testing.T) {
-	c, w := newContext(http.MethodGet, "/")
+	c, w := newContext()
 	se := domain.NewDatabaseNotFound("workspace", "abc")
 	response.RespondError(c, se)
 
@@ -99,7 +99,7 @@ func TestRespondError_StatusMapping(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.code), func(t *testing.T) {
-			c, w := newContext(http.MethodGet, "/")
+			c, w := newContext()
 			response.RespondError(c, domain.SourceError{Code: tc.code})
 			if w.Code != tc.wantStatus {
 				t.Errorf("code %s: expected %d, got %d", tc.code, tc.wantStatus, w.Code)
@@ -109,7 +109,7 @@ func TestRespondError_StatusMapping(t *testing.T) {
 }
 
 func TestRespondValidationError(t *testing.T) {
-	c, w := newContext(http.MethodGet, "/")
+	c, w := newContext()
 	response.RespondValidationError(c, domain.ErrValidationInvalidQuery, "bad param")
 
 	if w.Code != http.StatusBadRequest {

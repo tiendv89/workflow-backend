@@ -59,7 +59,7 @@ func TestListActivityEventsUsesIndependentActivityFilterClause(t *testing.T) {
 }
 
 func TestTaskIDOrderAscUsesNumericWorkflowOrder(t *testing.T) {
-	clause := taskIDOrderAsc("t")
+	clause := taskIDOrderAsc()
 
 	for _, want := range []string{
 		"regexp_replace(t.task_name, '^T([0-9]+)$', '\\1')",

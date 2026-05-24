@@ -7,17 +7,17 @@ import (
 
 func TestMigrationFSContainsExpectedFiles(t *testing.T) {
 	expected := []string{
-		"migrations/00001_workspaces.sql",
-		"migrations/00002_workspace_repos.sql",
-		"migrations/00003_workspace_features.sql",
-		"migrations/00004_workspace_feature_documents.sql",
-		"migrations/00005_workspace_tasks.sql",
-		"migrations/00006_workspace_activity_events.sql",
-		"migrations/00007_workspace_github_sources.sql",
-		"migrations/00008_workspace_sync_runs.sql",
-		"migrations/00009_use_uuid_feature_ids_for_tasks_documents_and_activity_events.sql",
-		"migrations/00010_feature_and_task_names.sql",
-		"migrations/00011_workspace_sync_runs_uuid_refs.sql",
+		"00001_workspaces.sql",
+		"00002_workspace_repos.sql",
+		"00003_workspace_features.sql",
+		"00004_workspace_feature_documents.sql",
+		"00005_workspace_tasks.sql",
+		"00006_workspace_activity_events.sql",
+		"00007_workspace_github_sources.sql",
+		"00008_workspace_sync_runs.sql",
+		"00009_use_uuid_feature_ids_for_tasks_documents_and_activity_events.sql",
+		"00010_feature_and_task_names.sql",
+		"00011_workspace_sync_runs_uuid_refs.sql",
 	}
 
 	for _, name := range expected {
@@ -40,7 +40,7 @@ func TestMigrationFSContainsExpectedFiles(t *testing.T) {
 
 func TestMigrationFSHasExactlyElevenSQLFiles(t *testing.T) {
 	var count int
-	err := fs.WalkDir(MigrationFS, "migrations", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(MigrationFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

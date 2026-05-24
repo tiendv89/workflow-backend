@@ -67,15 +67,15 @@ func main() {
 	zerolog.SetGlobalLevel(level)
 
 	migCtx, migCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer migCancel()
 	if err := database.RunMigrations(migCtx, cfg.Database.URL); err != nil {
+		migCancel()
 		log.Fatal().Err(err).Msg("migrations failed")
 	}
+	migCancel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	pool, err := database.Connect(ctx, cfg.Database.URL)
+	connCtx, connCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	pool, err := database.Connect(connCtx, cfg.Database.URL)
+	connCancel()
 	if err != nil {
 		log.Fatal().Err(err).Msg("database connect failed")
 	}
