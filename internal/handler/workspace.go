@@ -3,11 +3,10 @@ package handler
 
 import (
 	"context"
-	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/tiendv89/workflow-backend/internal/app/api/response"
 	"github.com/tiendv89/workflow-backend/internal/domain"
 )
 
@@ -56,10 +55,14 @@ func (h *WorkspaceHandler) RegisterRoutes(rg *gin.RouterGroup) {
 func (h *WorkspaceHandler) ListWorkspaces(c *gin.Context) {
 	result, err := h.svc.ListWorkspaces(c.Request.Context())
 	if err != nil {
-		respondError(c, err)
+		if se, ok := err.(domain.SourceError); ok {
+			response.RespondError(c, se)
+		} else {
+			response.RespondError(c, domain.NewAdapterError(domain.ErrAdapterInternal, err.Error()))
+		}
 		return
 	}
-	respondOK(c, result)
+	response.RespondOK(c, result)
 }
 
 // ImportWorkspace godoc
@@ -67,16 +70,16 @@ func (h *WorkspaceHandler) ListWorkspaces(c *gin.Context) {
 func (h *WorkspaceHandler) ImportWorkspace(c *gin.Context) {
 	var input domain.ImportInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		respondSourceError(c, domain.NewValidationError(domain.ErrValidationMissingInput, err.Error()), nil)
+		response.RespondValidationError(c, domain.ErrValidationMissingInput, err.Error())
 		return
 	}
 
 	detail, se := h.svc.ImportWorkspace(c.Request.Context(), input)
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, detail)
+	response.RespondOK(c, detail)
 }
 
 // GetWorkspace godoc
@@ -85,17 +88,17 @@ func (h *WorkspaceHandler) GetWorkspace(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
 	detail, se := h.svc.GetWorkspace(c.Request.Context(), workspaceID)
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, detail)
+	response.RespondOK(c, detail)
 }
 
 // SearchFeatures godoc
 // GET /api/workspaces/:workspaceId/features?title=&status=&sort=&page=&limit=
 func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
-	page, limit, ok := parsePagination(c)
+	page, limit, ok := response.ParsePagination(c)
 	if !ok {
 		return
 	}
@@ -108,10 +111,10 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 		Limit:  limit,
 	})
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, paged)
+	response.RespondOK(c, paged)
 }
 
 // SearchTasks godoc
@@ -119,7 +122,7 @@ func (h *WorkspaceHandler) SearchFeatures(c *gin.Context) {
 func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
 	featureID := c.Param("featureId")
-	page, limit, ok := parsePagination(c)
+	page, limit, ok := response.ParsePagination(c)
 	if !ok {
 		return
 	}
@@ -134,17 +137,17 @@ func (h *WorkspaceHandler) SearchTasks(c *gin.Context) {
 		Limit:  limit,
 	})
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, paged)
+	response.RespondOK(c, paged)
 }
 
 // SearchWorkspaceTasks godoc
 // GET /api/workspaces/:workspaceId/tasks?task_id=&title=&status=&repo=&sort=&page=&limit=
 func (h *WorkspaceHandler) SearchWorkspaceTasks(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
-	page, limit, ok := parsePagination(c)
+	page, limit, ok := response.ParsePagination(c)
 	if !ok {
 		return
 	}
@@ -159,10 +162,10 @@ func (h *WorkspaceHandler) SearchWorkspaceTasks(c *gin.Context) {
 		Limit:  limit,
 	})
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, paged)
+	response.RespondOK(c, paged)
 }
 
 // GetWorkspaceTask godoc
@@ -172,10 +175,10 @@ func (h *WorkspaceHandler) GetWorkspaceTask(c *gin.Context) {
 	taskID := c.Param("taskId")
 	detail, se := h.svc.GetWorkspaceTask(c.Request.Context(), workspaceID, taskID)
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, detail)
+	response.RespondOK(c, detail)
 }
 
 // SyncWorkspace godoc
@@ -184,10 +187,10 @@ func (h *WorkspaceHandler) SyncWorkspace(c *gin.Context) {
 	workspaceID := c.Param("workspaceId")
 	detail, se := h.svc.SyncWorkspace(c.Request.Context(), workspaceID)
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, detail)
+	response.RespondOK(c, detail)
 }
 
 // GetFeature godoc
@@ -197,10 +200,10 @@ func (h *WorkspaceHandler) GetFeature(c *gin.Context) {
 	featureID := c.Param("featureId")
 	detail, se := h.svc.GetFeature(c.Request.Context(), workspaceID, featureID)
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, detail)
+	response.RespondOK(c, detail)
 }
 
 // GetTask godoc
@@ -211,10 +214,10 @@ func (h *WorkspaceHandler) GetTask(c *gin.Context) {
 	taskID := c.Param("taskId")
 	detail, se := h.svc.GetTask(c.Request.Context(), workspaceID, featureID, taskID)
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, detail)
+	response.RespondOK(c, detail)
 }
 
 // ListActivity godoc
@@ -227,111 +230,8 @@ func (h *WorkspaceHandler) ListActivity(c *gin.Context) {
 	}
 	events, se := h.svc.ListActivity(c.Request.Context(), workspaceID, scope)
 	if se != (domain.SourceError{}) {
-		respondSourceError(c, se, nil)
+		response.RespondError(c, se)
 		return
 	}
-	respondOK(c, events)
-}
-
-// --- error response helpers ---
-
-type apiSuccessResponse struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data"`
-}
-
-type apiErrorResponse struct {
-	Success bool          `json:"success"`
-	Error   *apiErrorBody `json:"error"`
-}
-
-type apiErrorBody struct {
-	Code       domain.ErrorCode   `json:"code"`
-	Message    string             `json:"message"`
-	Source     domain.ErrorSource `json:"source"`
-	Retryable  bool               `json:"retryable"`
-	Path       string             `json:"path,omitempty"`
-	CachedData interface{}        `json:"cached_data,omitempty"`
-}
-
-func respondOK(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusOK, apiSuccessResponse{
-		Success: true,
-		Data:    data,
-	})
-}
-
-func respondError(c *gin.Context, err error) {
-	if se, ok := err.(domain.SourceError); ok {
-		respondSourceError(c, se, nil)
-		return
-	}
-	respondSourceError(c, domain.SourceError{
-		Code:      domain.ErrAdapterInternal,
-		Message:   err.Error(),
-		Source:    domain.ErrorSourceAdapter,
-		Retryable: true,
-	}, nil)
-}
-
-func parsePagination(c *gin.Context) (int, int, bool) {
-	page := 1
-	if rawPage := c.Query("page"); rawPage != "" {
-		parsed, err := strconv.Atoi(rawPage)
-		if err != nil {
-			respondSourceError(c, domain.NewValidationError(domain.ErrValidationInvalidQuery, "page must be an integer"), nil)
-			return 0, 0, false
-		}
-		if parsed < 1 {
-			respondSourceError(c, domain.NewValidationError(domain.ErrValidationInvalidQuery, "page must be greater than or equal to 1"), nil)
-			return 0, 0, false
-		}
-		page = parsed
-	}
-
-	limit := 0
-	if rawLimit := c.Query("limit"); rawLimit != "" {
-		parsed, err := strconv.Atoi(rawLimit)
-		if err != nil {
-			respondSourceError(c, domain.NewValidationError(domain.ErrValidationInvalidQuery, "limit must be an integer"), nil)
-			return 0, 0, false
-		}
-		limit = parsed
-	}
-	return page, limit, true
-}
-
-func respondSourceError(c *gin.Context, se domain.SourceError, cachedData interface{}) {
-	statusCode := sourceErrorHTTPStatus(se)
-	errBody := &apiErrorBody{
-		Code:      se.Code,
-		Message:   se.Message,
-		Source:    se.Source,
-		Retryable: se.Retryable,
-		Path:      se.Path,
-	}
-	if cachedData != nil {
-		errBody.CachedData = cachedData
-	}
-	c.JSON(statusCode, apiErrorResponse{
-		Success: false,
-		Error:   errBody,
-	})
-}
-
-func sourceErrorHTTPStatus(se domain.SourceError) int {
-	switch se.Code {
-	case domain.ErrDatabaseNotFound, domain.ErrGitHubNotFound:
-		return http.StatusNotFound
-	case domain.ErrValidationInvalidURL, domain.ErrValidationMissingInput, domain.ErrValidationInvalidQuery:
-		return http.StatusBadRequest
-	case domain.ErrGitHubUnauthorized:
-		return http.StatusUnauthorized
-	case domain.ErrGitHubRateLimit:
-		return http.StatusTooManyRequests
-	case domain.ErrAdapterTimeout:
-		return http.StatusGatewayTimeout
-	default:
-		return http.StatusInternalServerError
-	}
+	response.RespondOK(c, events)
 }
