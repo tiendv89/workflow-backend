@@ -100,7 +100,7 @@ func (c *Client) post(ctx context.Context, path string, body []byte) ([]byte, in
 	if err != nil {
 		return nil, 0, domain.NewAdapterError(domain.ErrAdapterTimeout, fmt.Sprintf("call %s: %v", path, err))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {

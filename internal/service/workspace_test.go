@@ -302,7 +302,7 @@ func makeUUID(hex string) database.Workspace {
 	_ = ws.ID.Scan(hex)
 	ws.Name = "test-workspace"
 	ws.Slug = "test"
-	ws.UpdatedAt.Scan(time.Now())
+	_ = ws.UpdatedAt.Scan(time.Now())
 	return ws
 }
 
@@ -395,7 +395,7 @@ func TestListWorkspaces_Success(t *testing.T) {
 func TestListWorkspaces_RepoURLBatchLoaded(t *testing.T) {
 	ws := makeUUID(testWSID)
 	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
-	src.WorkspaceID.Scan(testWSID)
+	_ = src.WorkspaceID.Scan(testWSID)
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
 		githubSrcs: map[string]database.WorkspaceGitHubSource{testWSID: src},
@@ -470,10 +470,10 @@ func TestGetWorkspace_Success(t *testing.T) {
 		Title:         "Feature One",
 		FeatureStatus: &status,
 	}
-	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
-	feat.FeatureID.Scan(testFeatureRowID)
-	feat.WorkspaceID.Scan(testWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("77777777-7777-7777-7777-777777777777")
+	_ = feat.FeatureID.Scan(testFeatureRowID)
+	_ = feat.WorkspaceID.Scan(testWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -534,21 +534,21 @@ func TestGetWorkspace_TaskCountsUsePublicFeatureID(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
-	feat.FeatureID.Scan(testFeatureRowID)
-	feat.WorkspaceID.Scan(testWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("77777777-7777-7777-7777-777777777777")
+	_ = feat.FeatureID.Scan(testFeatureRowID)
+	_ = feat.WorkspaceID.Scan(testWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 
 	done := "done"
 	ready := "ready"
 	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T1", Title: "Task One", Status: &done}
 	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T2", Title: "Task Two", Status: &ready}
-	task1.FeatureID.Scan(testFeatureRowID)
-	task2.FeatureID.Scan(testFeatureRowID)
-	task1.WorkspaceID.Scan(testWSID)
-	task2.WorkspaceID.Scan(testWSID)
-	task1.UpdatedAt.Scan(time.Now())
-	task2.UpdatedAt.Scan(time.Now())
+	_ = task1.FeatureID.Scan(testFeatureRowID)
+	_ = task2.FeatureID.Scan(testFeatureRowID)
+	_ = task1.WorkspaceID.Scan(testWSID)
+	_ = task2.WorkspaceID.Scan(testWSID)
+	_ = task1.UpdatedAt.Scan(time.Now())
+	_ = task2.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -627,7 +627,7 @@ func TestImportWorkspace_AdapterError(t *testing.T) {
 func TestImportWorkspace_Success(t *testing.T) {
 	ws := makeUUID(testWSID)
 	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
-	src.WorkspaceID.Scan(testWSID)
+	_ = src.WorkspaceID.Scan(testWSID)
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
 		syncRuns:   []database.WorkspaceSyncRun{makeSuccessfulSyncRun(testWSID)},
@@ -688,26 +688,26 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
-	feat.FeatureID.Scan(testFeatureRowID)
-	feat.WorkspaceID.Scan(testWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("77777777-7777-7777-7777-777777777777")
+	_ = feat.FeatureID.Scan(testFeatureRowID)
+	_ = feat.WorkspaceID.Scan(testWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	status := "ready"
 	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T1", Title: "Task One", Status: &status}
 	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T2", Title: "Task Two", Status: &status}
 	task10 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T10", Title: "Task Ten", Status: &status}
-	task1.ID.Scan(testTaskRowID)
-	task2.ID.Scan("55555555-5555-5555-5555-555555555555")
-	task10.ID.Scan("66666666-6666-6666-6666-666666666666")
-	task1.TaskID.Scan(testTaskRowID)
-	task2.TaskID.Scan("55555555-5555-5555-5555-555555555555")
-	task10.TaskID.Scan("66666666-6666-6666-6666-666666666666")
-	task1.FeatureID.Scan(testFeatureRowID)
-	task2.FeatureID.Scan(testFeatureRowID)
-	task10.FeatureID.Scan(testFeatureRowID)
-	task1.WorkspaceID.Scan(testWSID)
-	task2.WorkspaceID.Scan(testWSID)
-	task10.WorkspaceID.Scan(testWSID)
+	_ = task1.ID.Scan(testTaskRowID)
+	_ = task2.ID.Scan("55555555-5555-5555-5555-555555555555")
+	_ = task10.ID.Scan("66666666-6666-6666-6666-666666666666")
+	_ = task1.TaskID.Scan(testTaskRowID)
+	_ = task2.TaskID.Scan("55555555-5555-5555-5555-555555555555")
+	_ = task10.TaskID.Scan("66666666-6666-6666-6666-666666666666")
+	_ = task1.FeatureID.Scan(testFeatureRowID)
+	_ = task2.FeatureID.Scan(testFeatureRowID)
+	_ = task10.FeatureID.Scan(testFeatureRowID)
+	_ = task1.WorkspaceID.Scan(testWSID)
+	_ = task2.WorkspaceID.Scan(testWSID)
+	_ = task10.WorkspaceID.Scan(testWSID)
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -735,22 +735,22 @@ func TestSearchWorkspaceTasks_UsesQueryLayerAndPaginates(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.FeatureID.Scan(testFeatureRowID)
-	feat.WorkspaceID.Scan(testWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.FeatureID.Scan(testFeatureRowID)
+	_ = feat.WorkspaceID.Scan(testWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	status := "ready"
 	task1 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T1", Title: "Task One", Status: &status}
 	task2 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T2", Title: "Task Two", Status: &status}
 	task10 := database.WorkspaceTask{FeatureName: "feature-1", TaskName: "T10", Title: "Task Ten", Status: &status}
-	task1.FeatureID.Scan(testFeatureRowID)
-	task2.FeatureID.Scan(testFeatureRowID)
-	task10.FeatureID.Scan(testFeatureRowID)
-	task1.WorkspaceID.Scan(testWSID)
-	task2.WorkspaceID.Scan(testWSID)
-	task10.WorkspaceID.Scan(testWSID)
-	task1.UpdatedAt.Scan(time.Now())
-	task2.UpdatedAt.Scan(time.Now())
-	task10.UpdatedAt.Scan(time.Now())
+	_ = task1.FeatureID.Scan(testFeatureRowID)
+	_ = task2.FeatureID.Scan(testFeatureRowID)
+	_ = task10.FeatureID.Scan(testFeatureRowID)
+	_ = task1.WorkspaceID.Scan(testWSID)
+	_ = task2.WorkspaceID.Scan(testWSID)
+	_ = task10.WorkspaceID.Scan(testWSID)
+	_ = task1.UpdatedAt.Scan(time.Now())
+	_ = task2.UpdatedAt.Scan(time.Now())
+	_ = task10.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -789,10 +789,10 @@ func TestGetTask_Success(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
-	feat.FeatureID.Scan(testFeatureRowID)
-	feat.WorkspaceID.Scan(testWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("99999999-9999-9999-9999-999999999999")
+	_ = feat.FeatureID.Scan(testFeatureRowID)
+	_ = feat.WorkspaceID.Scan(testWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
@@ -803,11 +803,11 @@ func TestGetTask_Success(t *testing.T) {
 		Execution:   []byte(`{"actor_type":"agent"}`),
 		Pr:          []byte(`{"url":"https://github.com/tiendv89/workflow-backend/pull/3","status":"open"}`),
 	}
-	task.ID.Scan("88888888-8888-8888-8888-888888888888")
-	task.TaskID.Scan(testTaskRowID)
-	task.FeatureID.Scan(testFeatureRowID)
-	task.WorkspaceID.Scan(testWSID)
-	task.UpdatedAt.Scan(time.Now())
+	_ = task.ID.Scan("88888888-8888-8888-8888-888888888888")
+	_ = task.TaskID.Scan(testTaskRowID)
+	_ = task.FeatureID.Scan(testFeatureRowID)
+	_ = task.WorkspaceID.Scan(testWSID)
+	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -849,10 +849,10 @@ func TestGetWorkspaceTask_Success(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
-	feat.FeatureID.Scan(testFeatureRowID)
-	feat.WorkspaceID.Scan(testWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("99999999-9999-9999-9999-999999999999")
+	_ = feat.FeatureID.Scan(testFeatureRowID)
+	_ = feat.WorkspaceID.Scan(testWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
@@ -863,11 +863,11 @@ func TestGetWorkspaceTask_Success(t *testing.T) {
 		Execution:   []byte(`{"actor_type":"agent"}`),
 		Pr:          []byte(`{"url":"https://github.com/tiendv89/workflow-backend/pull/3","status":"open"}`),
 	}
-	task.ID.Scan("77777777-7777-7777-7777-777777777777")
-	task.TaskID.Scan(testTaskRowID)
-	task.FeatureID.Scan(testFeatureRowID)
-	task.WorkspaceID.Scan(testWSID)
-	task.UpdatedAt.Scan(time.Now())
+	_ = task.ID.Scan("77777777-7777-7777-7777-777777777777")
+	_ = task.TaskID.Scan(testTaskRowID)
+	_ = task.FeatureID.Scan(testFeatureRowID)
+	_ = task.WorkspaceID.Scan(testWSID)
+	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
