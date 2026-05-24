@@ -50,6 +50,12 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
+	migCtx, migCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer migCancel()
+	if err := database.RunMigrations(migCtx, cfg.DatabaseURL); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
