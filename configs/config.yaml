@@ -6,7 +6,7 @@ api:
     address: ":8080"
     mode: debug
   stale_threshold_minutes: 30
-  adapter_service_url: "http://adapter-service:8080"
+  adapter_service_url: "http://localhost:8081"
 
 db:
   host: 127.0.0.1
