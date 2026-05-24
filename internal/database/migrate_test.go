@@ -27,7 +27,7 @@ func TestMigrationFSContainsExpectedFiles(t *testing.T) {
 			continue
 		}
 		stat, err := f.Stat()
-		f.Close()
+		_ = f.Close()
 		if err != nil {
 			t.Errorf("stat %q: %v", name, err)
 			continue
