@@ -17,14 +17,15 @@ import (
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:          "api-service",
-	Short:        "workflow-backend API service",
+	Use:          "server",
+	Short:        "",
+	Long:         "",
 	SilenceUsage: true,
 }
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatal().Err(err).Msg("Engine failed to start")
+		log.Fatal().Err(err).Msg("server failed to start")
 	}
 }
 
@@ -58,8 +59,7 @@ func initLogging() {
 		},
 	}
 
-	multiWriter := zerolog.MultiLevelWriter(consoleWriter)
-	log.Logger = zerolog.New(multiWriter).With().Timestamp().Logger()
+	log.Logger = zerolog.New(zerolog.MultiLevelWriter(consoleWriter)).With().Timestamp().Logger()
 }
 
 func init() {
