@@ -129,7 +129,7 @@ func TestImport_FirstImport_200WithWorkspaceDetail(t *testing.T) {
 
 	resp := post(t, srv, "/api/workspaces/import",
 		`{"repo_url":"https://github.com/testorg/test-repo","name":"My Workspace"}`)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -158,7 +158,7 @@ func TestImport_MissingRepoURL_400(t *testing.T) {
 	defer srv.Close()
 
 	resp := post(t, srv, "/api/workspaces/import", `{}`)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", resp.StatusCode)
 	}
@@ -171,7 +171,7 @@ func TestImport_AdapterFailure_500WithErrorShape(t *testing.T) {
 	defer srv.Close()
 
 	resp := post(t, srv, "/api/workspaces/import", `{"repo_url":"https://github.com/org/repo"}`)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("expected 500 for adapter error, got %d", resp.StatusCode)
@@ -199,7 +199,7 @@ func TestSync_Success_200_FreshSourceState(t *testing.T) {
 	defer srv.Close()
 
 	resp := post(t, srv, "/api/workspaces/"+wsID+"/sync", "")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 on sync success, got %d", resp.StatusCode)
@@ -220,7 +220,7 @@ func TestSync_Failure_WithCache_Returns200_StaleData(t *testing.T) {
 	defer srv.Close()
 
 	resp := post(t, srv, "/api/workspaces/"+wsID+"/sync", "")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 with stale data, got %d", resp.StatusCode)
@@ -243,7 +243,7 @@ func TestSync_Failure_NoCache_ReturnsSourceError(t *testing.T) {
 	defer srv.Close()
 
 	resp := post(t, srv, "/api/workspaces/"+wsID+"/sync", "")
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode < 400 {
 		t.Errorf("expected error status for sync failure without cache, got %d", resp.StatusCode)
 	}
@@ -266,7 +266,7 @@ func TestListWorkspaces_TwoWorkspaces_WithSourceState(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -309,7 +309,7 @@ func TestGetWorkspace_Detail_IncludesFeatureAndTaskSummaries(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -335,7 +335,7 @@ func TestGetWorkspace_NotFound_404(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
@@ -371,7 +371,7 @@ func TestGetFeature_Detail_IncludesDocumentsTasksActivity(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -407,7 +407,7 @@ func TestGetFeature_NotFound_404(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/nonexistent")
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
 	}
@@ -429,7 +429,7 @@ func TestListFeatureTasks_ReturnsSummariesWithAllFields(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -458,7 +458,7 @@ func TestSearchFeatures_FiltersSortsAndLimits(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features?title=adapter&status=in_progress&sort=title_asc&limit=1")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -478,9 +478,9 @@ func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
 	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "done", []string{})
 	t2 := testhelpers.NewTask(wsID, featureID, "T2", "Adapter wiring", "in_progress", []string{"T1"})
 	t3 := testhelpers.NewTask(wsID, featureID, "T3", "Adapter cleanup", "in_progress", []string{"T2"})
-	t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
-	t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
-	t3.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	_ = t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	_ = t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	_ = t3.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
 	db := &testhelpers.FakeDB{
 		Workspaces: []database.Workspace{ws},
 		Features:   []database.WorkspaceFeature{feat},
@@ -490,7 +490,7 @@ func TestSearchTasks_FiltersSortsAndLimits(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks?title=adapter&status=in_progress&sort=title_desc&limit=1")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -510,9 +510,9 @@ func TestSearchWorkspaceTasks_FiltersSortsAndLimits(t *testing.T) {
 	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "done", []string{})
 	t2 := testhelpers.NewTask(wsID, featureID, "T2", "Adapter wiring", "in_progress", []string{"T1"})
 	t10 := testhelpers.NewTask(wsID, featureID, "T10", "Final adapter verification", "in_progress", []string{"T2"})
-	t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
-	t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
-	t10.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	_ = t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	_ = t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	_ = t10.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
 	db := &testhelpers.FakeDB{
 		Workspaces: []database.Workspace{ws},
 		Features:   []database.WorkspaceFeature{feat},
@@ -522,7 +522,7 @@ func TestSearchWorkspaceTasks_FiltersSortsAndLimits(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks?title=adapter&status=in_progress&sort=task_id_asc&limit=1&page=2")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -542,9 +542,9 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	t1 := testhelpers.NewTask(wsID, featureID, "T1", "Foundation", "ready", []string{})
 	t2 := testhelpers.NewTask(wsID, featureID, "T2", "Adapter wiring", "ready", []string{"T1"})
 	t10 := testhelpers.NewTask(wsID, featureID, "T10", "Final verification", "ready", []string{"T2"})
-	t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
-	t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
-	t10.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	_ = t1.ID.Scan("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	_ = t2.ID.Scan("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	_ = t10.ID.Scan("ffffffff-ffff-ffff-ffff-ffffffffffff")
 	db := &testhelpers.FakeDB{
 		Workspaces: []database.Workspace{ws},
 		Features:   []database.WorkspaceFeature{feat},
@@ -554,7 +554,7 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks?sort=task_id_asc")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -580,7 +580,7 @@ func TestSearchTasks_InvalidLimit_400(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks?limit=abc")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
@@ -594,7 +594,7 @@ func TestSearchFeatures_InvalidLimit_400(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features?limit=abc")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
@@ -618,7 +618,7 @@ func TestGetTask_Detail_UsesUUIDFeatureAndTaskIDs(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks/"+taskRowID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -659,7 +659,7 @@ func TestGetWorkspaceTask_Detail_UsesUUIDWorkspaceAndTaskIDs(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/tasks/"+taskRowID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -683,7 +683,7 @@ func TestGetTask_NotFound_404(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/features/"+featureRowID+"/tasks/99999999-9999-9999-9999-999999999999")
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
 	}
@@ -703,7 +703,7 @@ func TestListActivity_WorkspaceLevel_ReturnsEvents(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -721,7 +721,7 @@ func TestListActivity_WithFeatureFilter_200(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity?featureId="+featureID)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 with featureId filter, got %d", resp.StatusCode)
 	}
@@ -739,7 +739,7 @@ func TestListActivity_WithTaskOnlyFilter_ReturnsTaskEvents(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity?taskId="+taskRowID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 with taskId filter, got %d", resp.StatusCode)
@@ -765,7 +765,7 @@ func TestListActivity_WithFeatureAndTaskFilters_ReturnsMatchingTaskEvents(t *tes
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity?featureId="+featureRowID+"&taskId="+taskRowID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 with featureId and taskId filters, got %d", resp.StatusCode)
@@ -785,7 +785,7 @@ func TestListActivity_WorkspaceNotFound_404(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID+"/activity")
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404 for missing workspace, got %d", resp.StatusCode)
 	}
@@ -799,7 +799,7 @@ func TestErrorResponse_HasRequiredFields(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	apiErr := decodeAPIError(t, resp)
 	if apiErr.Code == "" {
@@ -824,7 +824,7 @@ func TestHealthz_NotShadowedByWorkspaceRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 from /healthz, got %d", resp.StatusCode)
 	}
@@ -863,7 +863,7 @@ func TestAllWorkspaceRoutes_Registered(t *testing.T) {
 		if rt.method == http.MethodGet {
 			resp = get(t, srv, rt.path)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound {
 			t.Errorf("route %s %s returned 404 — route not registered", rt.method, rt.path)
 		}
@@ -879,7 +879,7 @@ func TestGetWorkspace_IncludesStaleSourceState_WhenNoSyncRun(t *testing.T) {
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	detail := decodeAPIData[domain.WorkspaceDetail](t, resp)
 	if !detail.SourceState.Stale {
@@ -901,7 +901,7 @@ func TestGetWorkspace_IncludesFreshSourceState_AfterRecentSuccessfulSync(t *test
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	detail := decodeAPIData[domain.WorkspaceDetail](t, resp)
 	if detail.SourceState.Stale {
@@ -927,7 +927,7 @@ func TestGetWorkspace_IncludesStaleSourceState_AfterFailedSyncRun(t *testing.T) 
 	defer srv.Close()
 
 	resp := get(t, srv, "/api/workspaces/"+wsID)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	detail := decodeAPIData[domain.WorkspaceDetail](t, resp)
 	if !detail.SourceState.Stale {

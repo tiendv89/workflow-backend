@@ -235,22 +235,22 @@ func (f *fakeAdapter) SyncWorkspace(_ context.Context, _ string) error {
 
 func makeTestWorkspace(id string) database.Workspace {
 	var ws database.Workspace
-	ws.ID.Scan(id)
+	_ = ws.ID.Scan(id)
 	ws.Name = "Test Workspace"
 	ws.Slug = "test-workspace"
-	ws.UpdatedAt.Scan(time.Now())
+	_ = ws.UpdatedAt.Scan(time.Now())
 	return ws
 }
 
 func makeSuccessfulSyncRun(workspaceID string) database.WorkspaceSyncRun {
 	var run database.WorkspaceSyncRun
-	run.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	run.WorkspaceID.Scan(workspaceID)
+	_ = run.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	_ = run.WorkspaceID.Scan(workspaceID)
 	run.Trigger = "api_import"
 	run.Mode = "full"
 	run.Status = "success"
-	run.StartedAt.Scan(time.Now().Add(-time.Second))
-	run.FinishedAt.Scan(time.Now())
+	_ = run.StartedAt.Scan(time.Now().Add(-time.Second))
+	_ = run.FinishedAt.Scan(time.Now())
 	return run
 }
 
@@ -441,12 +441,12 @@ func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
 		FeatureName: "workspace-data-backend",
 		Title:       "Workspace Data Backend",
 	}
-	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
-	feat.FeatureID.Scan(handlerTestFeatureRowID)
-	feat.WorkspaceID.Scan(handlerTestWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("77777777-7777-7777-7777-777777777777")
+	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = feat.WorkspaceID.Scan(handlerTestWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
-	src.WorkspaceID.Scan(handlerTestWSID)
+	_ = src.WorkspaceID.Scan(handlerTestWSID)
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
 		syncRuns:   []database.WorkspaceSyncRun{makeSuccessfulSyncRun(handlerTestWSID)},
@@ -554,10 +554,10 @@ func TestGetFeature_200(t *testing.T) {
 		Title:         "My Feature",
 		FeatureStatus: &status,
 	}
-	feat.ID.Scan("77777777-7777-7777-7777-777777777777")
-	feat.FeatureID.Scan(handlerTestFeatureRowID)
-	feat.WorkspaceID.Scan(handlerTestWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("77777777-7777-7777-7777-777777777777")
+	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = feat.WorkspaceID.Scan(handlerTestWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -595,21 +595,21 @@ func TestListFeatureTasks_200(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan(handlerTestFeatureRowID)
-	feat.FeatureID.Scan(handlerTestFeatureRowID)
-	feat.WorkspaceID.Scan(handlerTestWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan(handlerTestFeatureRowID)
+	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = feat.WorkspaceID.Scan(handlerTestWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
 		Title:       "Task One",
 		Status:      &status,
 	}
-	task.ID.Scan("88888888-8888-8888-8888-888888888888")
-	task.TaskID.Scan(handlerTestTaskRowID)
-	task.FeatureID.Scan(handlerTestFeatureRowID)
-	task.WorkspaceID.Scan(handlerTestWSID)
-	task.UpdatedAt.Scan(time.Now())
+	_ = task.ID.Scan("88888888-8888-8888-8888-888888888888")
+	_ = task.TaskID.Scan(handlerTestTaskRowID)
+	_ = task.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = task.WorkspaceID.Scan(handlerTestWSID)
+	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -639,10 +639,10 @@ func TestGetTask_200(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
-	feat.FeatureID.Scan(handlerTestFeatureRowID)
-	feat.WorkspaceID.Scan(handlerTestWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("99999999-9999-9999-9999-999999999999")
+	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = feat.WorkspaceID.Scan(handlerTestWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
@@ -651,11 +651,11 @@ func TestGetTask_200(t *testing.T) {
 		DependsOn:   []byte(`[]`),
 		Execution:   []byte(`{"actor_type":"agent"}`),
 	}
-	task.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	task.TaskID.Scan(handlerTestTaskRowID)
-	task.FeatureID.Scan(handlerTestFeatureRowID)
-	task.WorkspaceID.Scan(handlerTestWSID)
-	task.UpdatedAt.Scan(time.Now())
+	_ = task.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	_ = task.TaskID.Scan(handlerTestTaskRowID)
+	_ = task.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = task.WorkspaceID.Scan(handlerTestWSID)
+	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
@@ -680,10 +680,10 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 		FeatureName: "feature-1",
 		Title:       "Feature One",
 	}
-	feat.ID.Scan("99999999-9999-9999-9999-999999999999")
-	feat.FeatureID.Scan(handlerTestFeatureRowID)
-	feat.WorkspaceID.Scan(handlerTestWSID)
-	feat.UpdatedAt.Scan(time.Now())
+	_ = feat.ID.Scan("99999999-9999-9999-9999-999999999999")
+	_ = feat.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = feat.WorkspaceID.Scan(handlerTestWSID)
+	_ = feat.UpdatedAt.Scan(time.Now())
 	task := database.WorkspaceTask{
 		FeatureName: "feature-1",
 		TaskName:    "T1",
@@ -692,11 +692,11 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 		DependsOn:   []byte(`[]`),
 		Execution:   []byte(`{"actor_type":"agent"}`),
 	}
-	task.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-	task.TaskID.Scan(handlerTestTaskRowID)
-	task.FeatureID.Scan(handlerTestFeatureRowID)
-	task.WorkspaceID.Scan(handlerTestWSID)
-	task.UpdatedAt.Scan(time.Now())
+	_ = task.ID.Scan("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	_ = task.TaskID.Scan(handlerTestTaskRowID)
+	_ = task.FeatureID.Scan(handlerTestFeatureRowID)
+	_ = task.WorkspaceID.Scan(handlerTestWSID)
+	_ = task.UpdatedAt.Scan(time.Now())
 
 	db := &fakeDB{
 		workspaces: []database.Workspace{ws},
