@@ -2,31 +2,26 @@ package database
 
 import (
 	"context"
-	"database/sql"
-	"embed"
-	"fmt"
+	"io/fs"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/pressly/goose/v3"
+	"github.com/tiendv89/workflow-backend/migrations"
+	pkgdb "github.com/tiendv89/workflow-backend/pkg/db"
 )
 
-//go:embed migrations/*.sql
-var MigrationFS embed.FS
+// MigrationFS exposes the embedded migration SQL files.
+var MigrationFS fs.FS = migrations.FS
 
 // RunMigrations applies all pending goose migrations to the target database.
 func RunMigrations(ctx context.Context, databaseURL string) error {
-	db, err := sql.Open("pgx", databaseURL)
-	if err != nil {
-		return fmt.Errorf("open migration db: %w", err)
-	}
-	defer func() { _ = db.Close() }()
+	return pkgdb.RunMigrations(ctx, databaseURL, migrations.FS)
+}
 
-	goose.SetBaseFS(MigrationFS)
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("set goose dialect: %w", err)
-	}
-	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
-	}
-	return nil
+// MigrateUpN applies up to n pending migrations. n=0 means apply all.
+func MigrateUpN(ctx context.Context, databaseURL string, n int) error {
+	return pkgdb.MigrateUpN(ctx, databaseURL, migrations.FS, n)
+}
+
+// MigrateDownN rolls back n migrations. n=0 is a no-op.
+func MigrateDownN(ctx context.Context, databaseURL string, n int) error {
+	return pkgdb.MigrateDownN(ctx, databaseURL, migrations.FS, n)
 }

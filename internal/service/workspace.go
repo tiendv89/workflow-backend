@@ -9,33 +9,33 @@ import (
 	"time"
 
 	"github.com/tiendv89/workflow-backend/internal/adapter"
-	"github.com/tiendv89/workflow-backend/internal/database"
+	database2 "github.com/tiendv89/workflow-backend/internal/database"
 	"github.com/tiendv89/workflow-backend/internal/domain"
 )
 
 // DatabaseReader is the read-only interface over the shared PostgreSQL schema.
 type DatabaseReader interface {
-	ListWorkspaces(ctx context.Context) ([]database.Workspace, error)
-	GetWorkspace(ctx context.Context, workspaceID string) (database.Workspace, error)
-	GetGitHubSource(ctx context.Context, workspaceID string) (database.WorkspaceGitHubSource, error)
-	ListGitHubSources(ctx context.Context) ([]database.WorkspaceGitHubSource, error)
-	ListLatestSyncRunsPerWorkspace(ctx context.Context) ([]database.WorkspaceSyncRun, error)
-	GetLatestSyncRun(ctx context.Context, workspaceID string) (database.WorkspaceSyncRun, error)
-	ListWorkspaceFeatures(ctx context.Context, workspaceID string) ([]database.WorkspaceFeature, error)
-	SearchWorkspaceFeatures(ctx context.Context, workspaceID string, filters database.FeatureSearchFilters) ([]database.WorkspaceFeature, error)
-	CountWorkspaceFeatures(ctx context.Context, workspaceID string, filters database.FeatureSearchFilters) (int, error)
-	ListFeatureTaskCounts(ctx context.Context, workspaceID string, featureIDs []string) ([]database.WorkspaceFeatureTaskCounts, error)
-	GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (database.WorkspaceFeature, error)
-	ListFeatureDocuments(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceFeatureDocument, error)
-	ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]database.WorkspaceTask, error)
-	SearchFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
-	CountFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database.TaskSearchFilters) (int, error)
-	SearchWorkspaceTasks(ctx context.Context, workspaceID string, filters database.TaskSearchFilters) ([]database.WorkspaceTask, error)
-	CountWorkspaceTasks(ctx context.Context, workspaceID string, filters database.TaskSearchFilters) (int, error)
-	ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]database.WorkspaceTask, error)
-	GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (database.WorkspaceTask, error)
-	GetWorkspaceTaskByID(ctx context.Context, workspaceID, taskID string) (database.WorkspaceTask, error)
-	ListActivityEvents(ctx context.Context, workspaceID, featureID, taskID string) ([]database.WorkspaceActivityEvent, error)
+	ListWorkspaces(ctx context.Context) ([]database2.Workspace, error)
+	GetWorkspace(ctx context.Context, workspaceID string) (database2.Workspace, error)
+	GetGitHubSource(ctx context.Context, workspaceID string) (database2.WorkspaceGitHubSource, error)
+	ListGitHubSources(ctx context.Context) ([]database2.WorkspaceGitHubSource, error)
+	ListLatestSyncRunsPerWorkspace(ctx context.Context) ([]database2.WorkspaceSyncRun, error)
+	GetLatestSyncRun(ctx context.Context, workspaceID string) (database2.WorkspaceSyncRun, error)
+	ListWorkspaceFeatures(ctx context.Context, workspaceID string) ([]database2.WorkspaceFeature, error)
+	SearchWorkspaceFeatures(ctx context.Context, workspaceID string, filters database2.FeatureSearchFilters) ([]database2.WorkspaceFeature, error)
+	CountWorkspaceFeatures(ctx context.Context, workspaceID string, filters database2.FeatureSearchFilters) (int, error)
+	ListFeatureTaskCounts(ctx context.Context, workspaceID string, featureIDs []string) ([]database2.WorkspaceFeatureTaskCounts, error)
+	GetWorkspaceFeature(ctx context.Context, workspaceID, featureID string) (database2.WorkspaceFeature, error)
+	ListFeatureDocuments(ctx context.Context, workspaceID, featureID string) ([]database2.WorkspaceFeatureDocument, error)
+	ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]database2.WorkspaceTask, error)
+	SearchFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database2.TaskSearchFilters) ([]database2.WorkspaceTask, error)
+	CountFeatureTasks(ctx context.Context, workspaceID, featureID string, filters database2.TaskSearchFilters) (int, error)
+	SearchWorkspaceTasks(ctx context.Context, workspaceID string, filters database2.TaskSearchFilters) ([]database2.WorkspaceTask, error)
+	CountWorkspaceTasks(ctx context.Context, workspaceID string, filters database2.TaskSearchFilters) (int, error)
+	ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]database2.WorkspaceTask, error)
+	GetWorkspaceTask(ctx context.Context, workspaceID, featureID, taskID string) (database2.WorkspaceTask, error)
+	GetWorkspaceTaskByID(ctx context.Context, workspaceID, taskID string) (database2.WorkspaceTask, error)
+	ListActivityEvents(ctx context.Context, workspaceID, featureID, taskID string) ([]database2.WorkspaceActivityEvent, error)
 }
 
 // AdapterCaller issues RPC calls to adapter-service for write operations.
@@ -72,9 +72,9 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	runMap := make(map[string]database.WorkspaceSyncRun, len(allRuns))
+	runMap := make(map[string]database2.WorkspaceSyncRun, len(allRuns))
 	for _, run := range allRuns {
-		runMap[database.UUIDString(run.WorkspaceID)] = run
+		runMap[database2.UUIDString(run.WorkspaceID)] = run
 	}
 
 	// Batch-load GitHub sources to avoid N+1 queries.
@@ -84,12 +84,12 @@ func (s *WorkspaceService) ListWorkspaces(ctx context.Context) ([]domain.Workspa
 	}
 	srcMap := make(map[string]string, len(allSrcs))
 	for _, src := range allSrcs {
-		srcMap[database.UUIDString(src.WorkspaceID)] = src.RepoURL
+		srcMap[database2.UUIDString(src.WorkspaceID)] = src.RepoURL
 	}
 
 	out := make([]domain.WorkspaceSummary, 0, len(rows))
 	for _, r := range rows {
-		wsID := database.UUIDString(r.ID)
+		wsID := database2.UUIDString(r.ID)
 		srcRun, ok := runMap[wsID]
 		var ss domain.SourceState
 		if ok {
@@ -133,16 +133,16 @@ func (s *WorkspaceService) ImportWorkspace(ctx context.Context, input domain.Imp
 func (s *WorkspaceService) GetWorkspaceSummary(ctx context.Context, workspaceID string) (*domain.WorkspaceSummary, domain.SourceError) {
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	wsID := database.UUIDString(ws.ID)
+	wsID := database2.UUIDString(ws.ID)
 	syncRun, err := s.db.GetLatestSyncRun(ctx, wsID)
 	var ss domain.SourceState
-	if errors.Is(err, database.ErrNotFound) || err != nil {
+	if errors.Is(err, database2.ErrNotFound) || err != nil {
 		ss = domain.DeriveSourceState(nil, s.staleThreshold)
 	} else {
 		ss = toSourceState(&syncRun, s.staleThreshold)
@@ -162,13 +162,13 @@ func (s *WorkspaceService) GetWorkspaceSummary(ctx context.Context, workspaceID 
 func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string) (*domain.WorkspaceDetail, domain.SourceError) {
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	wsID := database.UUIDString(ws.ID)
+	wsID := database2.UUIDString(ws.ID)
 
 	features, err := s.db.ListWorkspaceFeatures(ctx, wsID)
 	if err != nil {
@@ -184,7 +184,7 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 
 	syncRun, err := s.db.GetLatestSyncRun(ctx, wsID)
 	var ss domain.SourceState
-	if errors.Is(err, database.ErrNotFound) || err != nil {
+	if errors.Is(err, database2.ErrNotFound) || err != nil {
 		ss = domain.DeriveSourceState(nil, s.staleThreshold)
 	} else {
 		ss = toSourceState(&syncRun, s.staleThreshold)
@@ -192,10 +192,10 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 
 	featureSummaries := make([]domain.FeatureSummary, 0, len(features))
 	for _, f := range features {
-		counts := taskCountsByFeature[database.UUIDString(f.FeatureID)]
+		counts := taskCountsByFeature[database2.UUIDString(f.FeatureID)]
 		featureSummaries = append(featureSummaries, domain.FeatureSummary{
-			ID:           database.UUIDString(f.ID),
-			FeatureID:    database.UUIDString(f.FeatureID),
+			ID:           database2.UUIDString(f.ID),
+			FeatureID:    database2.UUIDString(f.FeatureID),
 			FeatureName:  f.FeatureName,
 			Title:        f.Title,
 			Status:       derefStr(f.FeatureStatus),
@@ -231,7 +231,7 @@ func (s *WorkspaceService) GetWorkspace(ctx context.Context, workspaceID string)
 // On sync failure without cached data, returns a structured source error.
 func (s *WorkspaceService) SyncWorkspace(ctx context.Context, workspaceID string) (*domain.WorkspaceDetail, domain.SourceError) {
 	if _, err := s.db.GetWorkspace(ctx, workspaceID); err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
@@ -264,22 +264,22 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 	// Verify workspace exists.
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	wsID := database.UUIDString(ws.ID)
+	wsID := database2.UUIDString(ws.ID)
 
 	feat, err := s.db.GetWorkspaceFeature(ctx, wsID, featureID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("feature", featureID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	featureUUID := database.UUIDString(feat.FeatureID)
+	featureUUID := database2.UUIDString(feat.FeatureID)
 
 	docs, err := s.db.ListFeatureDocuments(ctx, wsID, featureUUID)
 	if err != nil {
@@ -298,7 +298,7 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 
 	syncRun, err := s.db.GetLatestSyncRun(ctx, wsID)
 	var ss domain.SourceState
-	if errors.Is(err, database.ErrNotFound) || err != nil {
+	if errors.Is(err, database2.ErrNotFound) || err != nil {
 		ss = domain.DeriveSourceState(nil, s.staleThreshold)
 	} else {
 		ss = toSourceState(&syncRun, s.staleThreshold)
@@ -326,8 +326,8 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 
 	return &domain.FeatureDetail{
 		FeatureSummary: domain.FeatureSummary{
-			ID:           database.UUIDString(feat.ID),
-			FeatureID:    database.UUIDString(feat.FeatureID),
+			ID:           database2.UUIDString(feat.ID),
+			FeatureID:    database2.UUIDString(feat.FeatureID),
 			FeatureName:  feat.FeatureName,
 			Title:        feat.Title,
 			Status:       derefStr(feat.FeatureStatus),
@@ -348,13 +348,13 @@ func (s *WorkspaceService) GetFeature(ctx context.Context, workspaceID, featureI
 func (s *WorkspaceService) ListFeatureTasks(ctx context.Context, workspaceID, featureID string) ([]domain.TaskSummary, domain.SourceError) {
 	feat, err := s.db.GetWorkspaceFeature(ctx, workspaceID, featureID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("feature", featureID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	tasks, err := s.db.ListFeatureTasks(ctx, workspaceID, database.UUIDString(feat.FeatureID))
+	tasks, err := s.db.ListFeatureTasks(ctx, workspaceID, database2.UUIDString(feat.FeatureID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -383,14 +383,14 @@ func (s *WorkspaceService) SearchTasks(ctx context.Context, workspaceID, feature
 
 	feat, err := s.db.GetWorkspaceFeature(ctx, workspaceID, featureID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("feature", featureID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	featureUUID := database.UUIDString(feat.FeatureID)
+	featureUUID := database2.UUIDString(feat.FeatureID)
 
-	filters := database.TaskSearchFilters{
+	filters := database2.TaskSearchFilters{
 		TaskID: query.TaskID,
 		Title:  query.Title,
 		Status: query.Status,
@@ -430,7 +430,7 @@ func (s *WorkspaceService) SearchWorkspaceTasks(ctx context.Context, workspaceID
 		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of task_id_asc, task_id_desc, title_asc, title_desc, status_asc, status_desc, repo_asc, repo_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
 	}
 
-	filters := database.TaskSearchFilters{
+	filters := database2.TaskSearchFilters{
 		TaskID: query.TaskID,
 		Title:  query.Title,
 		Status: query.Status,
@@ -470,7 +470,7 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 		return nil, domain.NewValidationError(domain.ErrValidationInvalidQuery, "sort must be one of title_asc, title_desc, status_asc, status_desc, updated_at_asc, updated_at_desc, time_asc, time_desc, createdAt, -createdAt")
 	}
 
-	filters := database.FeatureSearchFilters{
+	filters := database2.FeatureSearchFilters{
 		Title:  query.Title,
 		Status: query.Status,
 		Sort:   query.Sort,
@@ -498,10 +498,10 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 
 	items := make([]domain.FeatureSummary, 0, len(features))
 	for _, f := range features {
-		counts := taskCountsByFeature[database.UUIDString(f.FeatureID)]
+		counts := taskCountsByFeature[database2.UUIDString(f.FeatureID)]
 		items = append(items, domain.FeatureSummary{
-			ID:           database.UUIDString(f.ID),
-			FeatureID:    database.UUIDString(f.FeatureID),
+			ID:           database2.UUIDString(f.ID),
+			FeatureID:    database2.UUIDString(f.FeatureID),
 			FeatureName:  f.FeatureName,
 			Title:        f.Title,
 			Status:       derefStr(f.FeatureStatus),
@@ -518,30 +518,30 @@ func (s *WorkspaceService) SearchFeatures(ctx context.Context, workspaceID strin
 func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, taskID string) (*domain.TaskDetail, domain.SourceError) {
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	wsID := database.UUIDString(ws.ID)
+	wsID := database2.UUIDString(ws.ID)
 
 	feat, err := s.db.GetWorkspaceFeature(ctx, wsID, featureID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("feature", featureID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	t, err := s.db.GetWorkspaceTask(ctx, wsID, database.UUIDString(feat.FeatureID), taskID)
+	t, err := s.db.GetWorkspaceTask(ctx, wsID, database2.UUIDString(feat.FeatureID), taskID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("task", taskID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	activity, err := s.db.ListActivityEvents(ctx, wsID, database.UUIDString(t.FeatureID), database.UUIDString(t.TaskID))
+	activity, err := s.db.ListActivityEvents(ctx, wsID, database2.UUIDString(t.FeatureID), database2.UUIDString(t.TaskID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -553,22 +553,22 @@ func (s *WorkspaceService) GetTask(ctx context.Context, workspaceID, featureID, 
 func (s *WorkspaceService) GetWorkspaceTask(ctx context.Context, workspaceID, taskID string) (*domain.TaskDetail, domain.SourceError) {
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	wsID := database.UUIDString(ws.ID)
+	wsID := database2.UUIDString(ws.ID)
 
 	t, err := s.db.GetWorkspaceTaskByID(ctx, wsID, taskID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("task", taskID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
 
-	activity, err := s.db.ListActivityEvents(ctx, wsID, database.UUIDString(t.FeatureID), database.UUIDString(t.TaskID))
+	activity, err := s.db.ListActivityEvents(ctx, wsID, database2.UUIDString(t.FeatureID), database2.UUIDString(t.TaskID))
 	if err != nil {
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
@@ -576,7 +576,7 @@ func (s *WorkspaceService) GetWorkspaceTask(ctx context.Context, workspaceID, ta
 	return taskDetailFromRow(workspaceID, t, activity), domain.SourceError{}
 }
 
-func taskDetailFromRow(workspaceID string, t database.WorkspaceTask, activity []database.WorkspaceActivityEvent) *domain.TaskDetail {
+func taskDetailFromRow(workspaceID string, t database2.WorkspaceTask, activity []database2.WorkspaceActivityEvent) *domain.TaskDetail {
 	activityEvents := make([]domain.ActivityEvent, 0, len(activity))
 	for _, a := range activity {
 		activityEvents = append(activityEvents, toActivityEvent(a))
@@ -634,12 +634,12 @@ func taskDetailFromRow(workspaceID string, t database.WorkspaceTask, activity []
 func (s *WorkspaceService) ListActivity(ctx context.Context, workspaceID string, scope domain.ActivityScope) ([]domain.ActivityEvent, domain.SourceError) {
 	ws, err := s.db.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		if errors.Is(err, database2.ErrNotFound) {
 			return nil, domain.NewDatabaseNotFound("workspace", workspaceID)
 		}
 		return nil, domain.NewDatabaseError(domain.ErrDatabaseQuery, err.Error())
 	}
-	wsID := database.UUIDString(ws.ID)
+	wsID := database2.UUIDString(ws.ID)
 
 	events, err := s.db.ListActivityEvents(ctx, wsID, scope.FeatureID, scope.TaskID)
 	if err != nil {
@@ -664,13 +664,13 @@ func (s *WorkspaceService) githubRepoURL(ctx context.Context, workspaceID string
 
 // --- conversion helpers ---
 
-func toSourceState(run *database.WorkspaceSyncRun, threshold time.Duration) domain.SourceState {
+func toSourceState(run *database2.WorkspaceSyncRun, threshold time.Duration) domain.SourceState {
 	if run == nil {
 		return domain.DeriveSourceState(nil, threshold)
 	}
 	sr := &domain.SyncRun{
-		ID:          database.UUIDString(run.ID),
-		WorkspaceID: database.UUIDString(run.WorkspaceID),
+		ID:          database2.UUIDString(run.ID),
+		WorkspaceID: database2.UUIDString(run.WorkspaceID),
 		Trigger:     run.Trigger,
 		Mode:        run.Mode,
 		Status:      domain.SyncStatus(run.Status),
@@ -692,13 +692,13 @@ func toSourceState(run *database.WorkspaceSyncRun, threshold time.Duration) doma
 	return domain.DeriveSourceState(sr, threshold)
 }
 
-func toTaskSummary(t database.WorkspaceTask) domain.TaskSummary {
+func toTaskSummary(t database2.WorkspaceTask) domain.TaskSummary {
 	isBlocked := t.Status != nil && *t.Status == "blocked"
 	return domain.TaskSummary{
-		ID:            database.UUIDString(t.ID),
-		TaskID:        database.UUIDString(t.TaskID),
+		ID:            database2.UUIDString(t.ID),
+		TaskID:        database2.UUIDString(t.TaskID),
 		TaskName:      t.TaskName,
-		FeatureID:     database.UUIDString(t.FeatureID),
+		FeatureID:     database2.UUIDString(t.FeatureID),
 		FeatureName:   t.FeatureName,
 		Title:         t.Title,
 		Status:        derefStr(t.Status),
@@ -711,14 +711,14 @@ func toTaskSummary(t database.WorkspaceTask) domain.TaskSummary {
 	}
 }
 
-func toActivityEvent(a database.WorkspaceActivityEvent) domain.ActivityEvent {
+func toActivityEvent(a database2.WorkspaceActivityEvent) domain.ActivityEvent {
 	e := domain.ActivityEvent{
 		Action:    derefStr(a.Action),
 		Scope:     a.ScopeType,
 		Actor:     derefStr(a.Actor),
 		Note:      derefStr(a.Note),
-		FeatureID: database.UUIDString(a.FeatureID),
-		TaskID:    database.UUIDString(a.TaskID),
+		FeatureID: database2.UUIDString(a.FeatureID),
+		TaskID:    database2.UUIDString(a.TaskID),
 	}
 	if a.OccurredAt != nil {
 		if t, err := time.Parse(time.RFC3339, *a.OccurredAt); err == nil {
@@ -746,18 +746,18 @@ func isValidTaskSearchSort(sort string) bool {
 	}
 }
 
-func featureIDs(features []database.WorkspaceFeature) []string {
+func featureIDs(features []database2.WorkspaceFeature) []string {
 	ids := make([]string, 0, len(features))
 	for _, feature := range features {
-		ids = append(ids, database.UUIDString(feature.FeatureID))
+		ids = append(ids, database2.UUIDString(feature.FeatureID))
 	}
 	return ids
 }
 
-func taskCountsFromRows(rows []database.WorkspaceFeatureTaskCounts) map[string]domain.TaskCounts {
+func taskCountsFromRows(rows []database2.WorkspaceFeatureTaskCounts) map[string]domain.TaskCounts {
 	counts := make(map[string]domain.TaskCounts, len(rows))
 	for _, row := range rows {
-		counts[database.UUIDString(row.FeatureID)] = domain.TaskCounts{
+		counts[database2.UUIDString(row.FeatureID)] = domain.TaskCounts{
 			Total:      int(row.Total),
 			Done:       int(row.Done),
 			InProgress: int(row.InProgress),
@@ -769,10 +769,10 @@ func taskCountsFromRows(rows []database.WorkspaceFeatureTaskCounts) map[string]d
 	return counts
 }
 
-func countTasksByFeature(tasks []database.WorkspaceTask) map[string]domain.TaskCounts {
+func countTasksByFeature(tasks []database2.WorkspaceTask) map[string]domain.TaskCounts {
 	counts := make(map[string]domain.TaskCounts, len(tasks))
 	for _, t := range tasks {
-		featureID := database.UUIDString(t.FeatureID)
+		featureID := database2.UUIDString(t.FeatureID)
 		current := counts[featureID]
 		current.Total++
 		if t.Status != nil {
@@ -794,7 +794,7 @@ func countTasksByFeature(tasks []database.WorkspaceTask) map[string]domain.TaskC
 	return counts
 }
 
-func countTasks(tasks []database.WorkspaceTask) domain.TaskCounts {
+func countTasks(tasks []database2.WorkspaceTask) domain.TaskCounts {
 	var counts domain.TaskCounts
 	for _, t := range tasks {
 		counts.Total++

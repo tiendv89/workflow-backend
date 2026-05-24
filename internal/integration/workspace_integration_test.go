@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,7 @@ import (
 	"github.com/tiendv89/workflow-backend/internal/domain"
 	"github.com/tiendv89/workflow-backend/internal/handler"
 	"github.com/tiendv89/workflow-backend/internal/service"
-	"github.com/tiendv89/workflow-backend/internal/testhelpers"
+	"github.com/tiendv89/workflow-backend/pkg/testhelpers"
 )
 
 const (
@@ -42,7 +43,11 @@ func newServer(db service.DatabaseReader, adp service.AdapterCaller) *httptest.S
 
 func get(t *testing.T, srv *httptest.Server, path string) *http.Response {
 	t.Helper()
-	resp, err := http.Get(srv.URL + path)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+path, nil)
+	if err != nil {
+		t.Fatalf("new request GET %s: %v", path, err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}
@@ -51,7 +56,12 @@ func get(t *testing.T, srv *httptest.Server, path string) *http.Response {
 
 func post(t *testing.T, srv *httptest.Server, path, body string) *http.Response {
 	t.Helper()
-	resp, err := http.Post(srv.URL+path, "application/json", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request POST %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}
@@ -820,7 +830,11 @@ func TestHealthz_NotShadowedByWorkspaceRoutes(t *testing.T) {
 	srv := newServer(db, &testhelpers.FakeAdapter{})
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/healthz")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/healthz", nil)
+	if err != nil {
+		t.Fatalf("new request GET /healthz: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}

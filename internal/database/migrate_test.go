@@ -7,17 +7,18 @@ import (
 
 func TestMigrationFSContainsExpectedFiles(t *testing.T) {
 	expected := []string{
-		"migrations/00001_workspaces.sql",
-		"migrations/00002_workspace_repos.sql",
-		"migrations/00003_workspace_features.sql",
-		"migrations/00004_workspace_feature_documents.sql",
-		"migrations/00005_workspace_tasks.sql",
-		"migrations/00006_workspace_activity_events.sql",
-		"migrations/00007_workspace_github_sources.sql",
-		"migrations/00008_workspace_sync_runs.sql",
-		"migrations/00009_use_uuid_feature_ids_for_tasks_documents_and_activity_events.sql",
-		"migrations/00010_feature_and_task_names.sql",
-		"migrations/00011_workspace_sync_runs_uuid_refs.sql",
+		"00001_workspaces.sql",
+		"00002_workspace_repos.sql",
+		"00003_workspace_features.sql",
+		"00004_workspace_feature_documents.sql",
+		"00005_workspace_tasks.sql",
+		"00006_workspace_activity_events.sql",
+		"00007_workspace_github_sources.sql",
+		"00008_workspace_sync_runs.sql",
+		"00009_use_uuid_feature_ids_for_tasks_documents_and_activity_events.sql",
+		"00010_feature_and_task_names.sql",
+		"00011_workspace_sync_runs_uuid_refs.sql",
+		"00012_workspace_notification_settings.sql",
 	}
 
 	for _, name := range expected {
@@ -40,7 +41,7 @@ func TestMigrationFSContainsExpectedFiles(t *testing.T) {
 
 func TestMigrationFSHasExactlyElevenSQLFiles(t *testing.T) {
 	var count int
-	err := fs.WalkDir(MigrationFS, "migrations", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(MigrationFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -52,8 +53,8 @@ func TestMigrationFSHasExactlyElevenSQLFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walk MigrationFS: %v", err)
 	}
-	if count != 11 {
-		t.Errorf("expected 11 migration files, got %d", count)
+	if count != 12 {
+		t.Errorf("expected 12 migration files, got %d", count)
 	}
 }
 
@@ -62,5 +63,29 @@ func TestRunMigrationsReturnsErrorOnInvalidDatabaseURL(t *testing.T) {
 	err := RunMigrations(ctx, "not-a-valid-url")
 	if err == nil {
 		t.Fatal("expected error for invalid database URL, got nil")
+	}
+}
+
+func TestMigrateUpNReturnsErrorOnInvalidDatabaseURL(t *testing.T) {
+	ctx := t.Context()
+	for _, n := range []int{0, 1, 3} {
+		if err := MigrateUpN(ctx, "not-a-valid-url", n); err == nil {
+			t.Errorf("MigrateUpN(n=%d): expected error for invalid URL, got nil", n)
+		}
+	}
+}
+
+func TestMigrateDownNReturnsErrorOnInvalidDatabaseURL(t *testing.T) {
+	ctx := t.Context()
+	if err := MigrateDownN(ctx, "not-a-valid-url", 1); err == nil {
+		t.Fatal("expected error for invalid database URL, got nil")
+	}
+}
+
+func TestMigrateDownNZeroStepsIsNoOp(t *testing.T) {
+	ctx := t.Context()
+	// n=0: no iterations, no db call — returns nil immediately
+	if err := MigrateDownN(ctx, "not-a-valid-url", 0); err != nil {
+		t.Fatalf("MigrateDownN with 0 steps should be a no-op, got error: %v", err)
 	}
 }

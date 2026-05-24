@@ -283,9 +283,9 @@ func (r *Reader) ListFeatureTaskCounts(ctx context.Context, workspaceID string, 
 	args[0] = uid
 	placeholders := make([]string, 0, len(featureIDs))
 	for _, featureID := range featureIDs {
-		fid, err := parseUUID(featureID)
-		if err != nil {
-			return nil, err
+		fid, parseErr := parseUUID(featureID)
+		if parseErr != nil {
+			return nil, parseErr
 		}
 		args = append(args, fid)
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
@@ -420,7 +420,7 @@ func (r *Reader) ListFeatureTasks(ctx context.Context, workspaceID, featureID st
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
 		WHERE t.workspace_id = $1 AND t.feature_id = $2
-		ORDER BY %s`, taskIDOrderAsc("t"))
+		ORDER BY %s`, taskIDOrderAsc())
 	rows, err := r.db.Query(ctx, q, uid, fid)
 	if err != nil {
 		return nil, err
@@ -449,7 +449,7 @@ func (r *Reader) ListWorkspaceTasks(ctx context.Context, workspaceID string) ([]
 		       t.pr, t.workspace_pr, t.source_path, t.source_hash, t.created_at, t.updated_at
 		FROM workspace_tasks t
 		WHERE t.workspace_id = $1
-		ORDER BY t.feature_name, %s`, taskIDOrderAsc("t"))
+		ORDER BY t.feature_name, %s`, taskIDOrderAsc())
 	rows, err := r.db.Query(ctx, q, uid)
 	if err != nil {
 		return nil, err
@@ -700,17 +700,16 @@ func (r *Reader) CountFeatureTasks(ctx context.Context, workspaceID, featureID s
 	return count, nil
 }
 
-func taskIDOrderAsc(alias string) string {
-	return fmt.Sprintf("%s ASC NULLS LAST, %s.task_name ASC", taskIDNumberExpr(alias), alias)
+func taskIDOrderAsc() string {
+	return fmt.Sprintf("%s ASC NULLS LAST, t.task_name ASC", taskIDNumberExpr())
 }
 
-func taskIDOrderDesc(alias string) string {
-	return fmt.Sprintf("%s DESC NULLS LAST, %s.task_name DESC", taskIDNumberExpr(alias), alias)
+func taskIDOrderDesc() string {
+	return fmt.Sprintf("%s DESC NULLS LAST, t.task_name DESC", taskIDNumberExpr())
 }
 
-func taskIDNumberExpr(alias string) string {
-	col := alias + ".task_name"
-	return fmt.Sprintf("NULLIF(regexp_replace(%s, '^T([0-9]+)$', '\\1'), %s)::int", col, col)
+func taskIDNumberExpr() string {
+	return "NULLIF(regexp_replace(t.task_name, '^T([0-9]+)$', '\\1'), t.task_name)::int"
 }
 
 func activityFilterClause(featureID, taskID string, firstArg int) (string, []interface{}, int, error) {
@@ -744,28 +743,28 @@ func activityFilterClause(featureID, taskID string, firstArg int) (string, []int
 func (r *Reader) searchTasks(ctx context.Context, baseWhere []string, baseArgs []interface{}, argPos int, filters TaskSearchFilters) ([]WorkspaceTask, error) {
 	where, args, argPos := buildTaskWhere(baseWhere, baseArgs, argPos, filters)
 
-	orderBy := taskIDOrderAsc("t")
+	orderBy := taskIDOrderAsc()
 	switch filters.Sort {
 	case "task_id_desc":
-		orderBy = taskIDOrderDesc("t")
+		orderBy = taskIDOrderDesc()
 	case "title_asc":
-		orderBy = "t.title ASC, " + taskIDOrderAsc("t")
+		orderBy = "t.title ASC, " + taskIDOrderAsc()
 	case "title_desc":
-		orderBy = "t.title DESC, " + taskIDOrderAsc("t")
+		orderBy = "t.title DESC, " + taskIDOrderAsc()
 	case "status_asc":
-		orderBy = "t.status ASC NULLS LAST, " + taskIDOrderAsc("t")
+		orderBy = "t.status ASC NULLS LAST, " + taskIDOrderAsc()
 	case "status_desc":
-		orderBy = "t.status DESC NULLS LAST, " + taskIDOrderAsc("t")
+		orderBy = "t.status DESC NULLS LAST, " + taskIDOrderAsc()
 	case "repo_asc":
-		orderBy = "t.repo ASC NULLS LAST, " + taskIDOrderAsc("t")
+		orderBy = "t.repo ASC NULLS LAST, " + taskIDOrderAsc()
 	case "repo_desc":
-		orderBy = "t.repo DESC NULLS LAST, " + taskIDOrderAsc("t")
+		orderBy = "t.repo DESC NULLS LAST, " + taskIDOrderAsc()
 	case "updated_at_asc", "time_asc", "createdAt":
-		orderBy = "t.updated_at ASC, " + taskIDOrderAsc("t")
+		orderBy = "t.updated_at ASC, " + taskIDOrderAsc()
 	case "updated_at_desc", "time_desc", "-createdAt":
-		orderBy = "t.updated_at DESC, " + taskIDOrderAsc("t")
+		orderBy = "t.updated_at DESC, " + taskIDOrderAsc()
 	case "task_id_asc", "":
-		orderBy = taskIDOrderAsc("t")
+		orderBy = taskIDOrderAsc()
 	}
 
 	limitClause := ""

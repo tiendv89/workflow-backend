@@ -2,88 +2,135 @@ package integration_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/tiendv89/workflow-backend/internal/config"
+	"github.com/tiendv89/workflow-backend/configs"
 )
 
-// TestConfig_RequiresDatabaseURL verifies that missing DATABASE_URL is rejected at startup.
-func TestConfig_RequiresDatabaseURL(t *testing.T) {
-	_ = os.Unsetenv("DATABASE_URL")
-	_, err := config.Load()
+// writeConfig writes a temporary config.yaml for tests and returns its path.
+func writeConfig(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "config-*.yaml")
+	if err != nil {
+		t.Fatalf("create temp config: %v", err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+	_ = f.Close()
+	return filepath.Clean(f.Name())
+}
+
+const baseConfig = `
+log:
+  level: info
+api:
+  http:
+    address: ":8081"
+    mode: release
+  stale_threshold_minutes: 30
+  adapter_service_url: "http://adapter-service:8080"
+db:
+  host: localhost
+  port: 5432
+  db_name: testdb
+  user: testuser
+  password: testpass
+`
+
+// TestConfig_RequiresDBHost verifies that missing db.host is rejected at startup.
+func TestConfig_RequiresDBHost(t *testing.T) {
+	p := writeConfig(t, `
+log:
+  level: info
+api:
+  http:
+    address: ":8081"
+    mode: release
+db:
+  host: ""
+`)
+	_, err := configs.Load(p)
 	if err == nil {
-		t.Error("expected error when DATABASE_URL is missing")
+		t.Error("expected error when db.host is empty")
 	}
 }
 
-// TestConfig_Defaults verifies that optional env vars have correct defaults.
+// TestConfig_Defaults verifies that defaults are applied when keys are absent.
 func TestConfig_Defaults(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgresql://localhost/test")
-	_ = os.Unsetenv("PORT")
-	_ = os.Unsetenv("STALE_THRESHOLD_MINUTES")
-	_ = os.Unsetenv("ADAPTER_SERVICE_URL")
-
-	cfg, err := config.Load()
+	p := writeConfig(t, baseConfig)
+	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Port != 8081 {
-		t.Errorf("expected default port 8081, got %d", cfg.Port)
+	if cfg.API.HTTP.Address != ":8081" {
+		t.Errorf("expected api.http.address=:8081, got %q", cfg.API.HTTP.Address)
 	}
-	if cfg.StaleThreshold.Minutes() != 30 {
-		t.Errorf("expected default stale threshold 30m, got %v", cfg.StaleThreshold)
+	if cfg.API.StaleThresholdMinutes != 30 {
+		t.Errorf("expected default stale threshold 30, got %d", cfg.API.StaleThresholdMinutes)
 	}
-	if cfg.AdapterServiceURL != "http://adapter-service:8080" {
-		t.Errorf("expected default adapter URL, got %q", cfg.AdapterServiceURL)
+	if cfg.API.AdapterServiceURL != "http://adapter-service:8080" {
+		t.Errorf("expected default adapter URL, got %q", cfg.API.AdapterServiceURL)
 	}
 }
 
-// TestConfig_CustomPort verifies the PORT env var is parsed correctly.
-func TestConfig_CustomPort(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgresql://localhost/test")
-	t.Setenv("PORT", "9090")
-
-	cfg, err := config.Load()
+// TestConfig_CustomAddress verifies api.http.address is parsed correctly from YAML.
+func TestConfig_CustomAddress(t *testing.T) {
+	p := writeConfig(t, baseConfig+`
+api:
+  http:
+    address: ":9090"
+    mode: debug
+`)
+	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Port != 9090 {
-		t.Errorf("expected port 9090, got %d", cfg.Port)
+	if cfg.API.HTTP.Address != ":9090" {
+		t.Errorf("expected api.http.address=:9090, got %q", cfg.API.HTTP.Address)
+	}
+	if cfg.API.HTTP.Mode != "debug" {
+		t.Errorf("expected api.http.mode=debug, got %q", cfg.API.HTTP.Mode)
 	}
 }
 
-// TestConfig_InvalidPort returns an error for non-numeric PORT.
-func TestConfig_InvalidPort(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgresql://localhost/test")
-	t.Setenv("PORT", "not-a-number")
+// TestConfig_EnvOverride verifies that env vars override YAML values.
+func TestConfig_EnvOverride(t *testing.T) {
+	t.Setenv("DB_HOST", "envhost")
+	p := writeConfig(t, baseConfig)
+	cfg, err := configs.Load(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DB.Host != "envhost" {
+		t.Errorf("expected env override for db.host, got %q", cfg.DB.Host)
+	}
+}
 
-	_, err := config.Load()
+// TestConfig_NegativeStaleThreshold verifies negative stale threshold is rejected.
+func TestConfig_NegativeStaleThreshold(t *testing.T) {
+	p := writeConfig(t, baseConfig+`
+api:
+  stale_threshold_minutes: -1
+`)
+	_, err := configs.Load(p)
 	if err == nil {
-		t.Error("expected error for invalid PORT value")
+		t.Error("expected error for negative stale_threshold_minutes")
 	}
 }
 
-// TestConfig_CustomStaleThreshold verifies STALE_THRESHOLD_MINUTES is parsed.
-func TestConfig_CustomStaleThreshold(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgresql://localhost/test")
-	t.Setenv("STALE_THRESHOLD_MINUTES", "60")
-
-	cfg, err := config.Load()
+// TestConfig_StaleThresholdDuration verifies StaleThreshold() returns the right duration.
+func TestConfig_StaleThresholdDuration(t *testing.T) {
+	p := writeConfig(t, baseConfig+`
+api:
+  stale_threshold_minutes: 60
+`)
+	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.StaleThreshold.Minutes() != 60 {
-		t.Errorf("expected stale threshold 60m, got %v", cfg.StaleThreshold)
-	}
-}
-
-// TestConfig_InvalidStaleThreshold rejects negative values.
-func TestConfig_InvalidStaleThreshold(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgresql://localhost/test")
-	t.Setenv("STALE_THRESHOLD_MINUTES", "-1")
-
-	_, err := config.Load()
-	if err == nil {
-		t.Fatal("expected error for negative STALE_THRESHOLD_MINUTES value")
+	if cfg.StaleThreshold().Minutes() != 60 {
+		t.Errorf("expected 60 minutes, got %v", cfg.StaleThreshold())
 	}
 }
