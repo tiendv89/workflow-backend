@@ -233,9 +233,9 @@ func (f *fakeAdapter) SyncWorkspace(_ context.Context, _ string) error {
 
 // --- setup helpers ---
 
-func makeTestWorkspace(id string) database.Workspace {
+func makeTestWorkspace() database.Workspace {
 	var ws database.Workspace
-	_ = ws.ID.Scan(id)
+	_ = ws.ID.Scan(handlerTestWSID)
 	ws.Name = "Test Workspace"
 	ws.Slug = "test-workspace"
 	_ = ws.UpdatedAt.Scan(time.Now())
@@ -314,12 +314,12 @@ func decodeAPIError(t *testing.T, body []byte) testAPIError {
 }
 
 func TestListWorkspaces_200(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -333,11 +333,11 @@ func TestListWorkspaces_200(t *testing.T) {
 }
 
 func TestPublicResponseEnvelope_SuccessAndError(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	r := newTestRouter(&fakeDB{workspaces: []database.Workspace{ws}}, &fakeAdapter{})
 
 	successRecorder := httptest.NewRecorder()
-	successReq, _ := http.NewRequest(http.MethodGet, "/api/workspaces", nil)
+	successReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces", nil)
 	r.ServeHTTP(successRecorder, successReq)
 
 	var successBody map[string]json.RawMessage
@@ -355,7 +355,7 @@ func TestPublicResponseEnvelope_SuccessAndError(t *testing.T) {
 	}
 
 	errorRecorder := httptest.NewRecorder()
-	errorReq, _ := http.NewRequest(http.MethodGet, "/api/workspaces/99999999-9999-9999-9999-999999999999/activity", nil)
+	errorReq, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/99999999-9999-9999-9999-999999999999/activity", nil)
 	r.ServeHTTP(errorRecorder, errorReq)
 
 	var errorBody struct {
@@ -396,12 +396,12 @@ func TestPublicResponseEnvelope_SuccessAndError(t *testing.T) {
 }
 
 func TestGetWorkspace_200(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -422,7 +422,7 @@ func TestGetWorkspace_404(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
@@ -436,7 +436,7 @@ func TestGetWorkspace_404(t *testing.T) {
 }
 
 func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	feat := database.WorkspaceFeature{
 		FeatureName: "workspace-data-backend",
 		Title:       "Workspace Data Backend",
@@ -459,7 +459,7 @@ func TestImportWorkspace_200WithWorkspaceDetail(t *testing.T) {
 
 	body := `{"repo_url":"https://github.com/org/repo"}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/import", strings.NewReader(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/workspaces/import", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -487,7 +487,7 @@ func TestImportWorkspace_400_MissingBody(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/import", strings.NewReader(`{}`))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/workspaces/import", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -503,7 +503,7 @@ func TestImportWorkspace_AdapterError(t *testing.T) {
 
 	body := `{"repo_url":"https://github.com/org/repo"}`
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/import", strings.NewReader(body))
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/workspaces/import", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
@@ -513,12 +513,12 @@ func TestImportWorkspace_AdapterError(t *testing.T) {
 }
 
 func TestSyncWorkspace_200_Success(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/"+handlerTestWSID+"/sync", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/workspaces/"+handlerTestWSID+"/sync", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -527,13 +527,13 @@ func TestSyncWorkspace_200_Success(t *testing.T) {
 }
 
 func TestSyncWorkspace_200_StaleOnAdapterFailure(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	syncErr := domain.NewAdapterError(domain.ErrAdapterTimeout, "timeout")
 	r := newTestRouter(db, &fakeAdapter{syncErr: syncErr})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/workspaces/"+handlerTestWSID+"/sync", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/workspaces/"+handlerTestWSID+"/sync", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -547,7 +547,7 @@ func TestSyncWorkspace_200_StaleOnAdapterFailure(t *testing.T) {
 }
 
 func TestGetFeature_200(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	status := "in_design"
 	feat := database.WorkspaceFeature{
 		FeatureName:   "feature-1",
@@ -566,7 +566,7 @@ func TestGetFeature_200(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID, nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -575,12 +575,12 @@ func TestGetFeature_200(t *testing.T) {
 }
 
 func TestGetFeature_404(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/missing", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/missing", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
@@ -589,7 +589,7 @@ func TestGetFeature_404(t *testing.T) {
 }
 
 func TestListFeatureTasks_200(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	status := "ready"
 	feat := database.WorkspaceFeature{
 		FeatureName: "feature-1",
@@ -619,7 +619,7 @@ func TestListFeatureTasks_200(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -633,7 +633,7 @@ func TestListFeatureTasks_200(t *testing.T) {
 }
 
 func TestGetTask_200(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	status := "in_progress"
 	feat := database.WorkspaceFeature{
 		FeatureName: "feature-1",
@@ -665,7 +665,7 @@ func TestGetTask_200(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks/"+handlerTestTaskRowID, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks/"+handlerTestTaskRowID, nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -674,7 +674,7 @@ func TestGetTask_200(t *testing.T) {
 }
 
 func TestGetWorkspaceTask_200(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	status := "in_progress"
 	feat := database.WorkspaceFeature{
 		FeatureName: "feature-1",
@@ -706,7 +706,7 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/tasks/"+handlerTestTaskRowID, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/tasks/"+handlerTestTaskRowID, nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -722,12 +722,12 @@ func TestGetWorkspaceTask_200(t *testing.T) {
 }
 
 func TestGetTask_404(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks/T99", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/features/"+handlerTestFeatureRowID+"/tasks/T99", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
@@ -736,12 +736,12 @@ func TestGetTask_404(t *testing.T) {
 }
 
 func TestListActivity_200(t *testing.T) {
-	ws := makeTestWorkspace(handlerTestWSID)
+	ws := makeTestWorkspace()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/activity", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/activity", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -754,7 +754,7 @@ func TestListActivity_404_WorkspaceNotFound(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/activity", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID+"/activity", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusNotFound {
@@ -767,7 +767,7 @@ func TestErrorResponseShape(t *testing.T) {
 	r := newTestRouter(db, &fakeAdapter{})
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/api/workspaces/"+handlerTestWSID, nil)
 	r.ServeHTTP(w, req)
 
 	apiErr := decodeAPIError(t, w.Body.Bytes())

@@ -15,7 +15,7 @@ linters:
     - unconvert
     - unparam
     - bodyclose
-    - exportloopref
+    - copyloopvar
     - gocritic
     - noctx
 

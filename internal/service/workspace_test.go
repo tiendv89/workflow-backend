@@ -296,10 +296,9 @@ func (f *fakeAdapter) SyncWorkspace(_ context.Context, _ string) error {
 
 // --- helpers ---
 
-func makeUUID(hex string) database.Workspace {
-	// Use a fixed UUID for tests via pgtype scanning.
+func makeUUID() database.Workspace {
 	var ws database.Workspace
-	_ = ws.ID.Scan(hex)
+	_ = ws.ID.Scan(testWSID)
 	ws.Name = "test-workspace"
 	ws.Slug = "test"
 	_ = ws.UpdatedAt.Scan(time.Now())
@@ -373,7 +372,7 @@ func taskNumber(taskID string) (int, bool) {
 // --- tests ---
 
 func TestListWorkspaces_Success(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	svc := newService(db, &fakeAdapter{})
 
@@ -393,7 +392,7 @@ func TestListWorkspaces_Success(t *testing.T) {
 }
 
 func TestListWorkspaces_RepoURLBatchLoaded(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
 	_ = src.WorkspaceID.Scan(testWSID)
 	db := &fakeDB{
@@ -425,7 +424,7 @@ func TestListWorkspaces_DBError(t *testing.T) {
 }
 
 func TestListWorkspaces_LatestSyncRunsError(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	db := &fakeDB{
 		workspaces:  []database.Workspace{ws},
 		listRunsErr: errors.New("sync run query failed"),
@@ -439,7 +438,7 @@ func TestListWorkspaces_LatestSyncRunsError(t *testing.T) {
 }
 
 func TestListWorkspaces_GitHubSourcesError(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	db := &fakeDB{
 		workspaces:  []database.Workspace{ws},
 		listSrcsErr: errors.New("source query failed"),
@@ -463,7 +462,7 @@ func TestGetWorkspace_NotFound(t *testing.T) {
 }
 
 func TestGetWorkspace_Success(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	status := "in_design"
 	feat := database.WorkspaceFeature{
 		FeatureName:   "feature-1",
@@ -500,7 +499,7 @@ func TestGetWorkspace_Success(t *testing.T) {
 }
 
 func TestGetWorkspace_FailedSyncIncludesUserFacingErrorMessage(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	errCode := "GITHUB_RATE_LIMIT"
 	errMsg := "GitHub API rate limit reached. Try again later."
 	run := makeSuccessfulSyncRun(testWSID)
@@ -529,7 +528,7 @@ func TestGetWorkspace_FailedSyncIncludesUserFacingErrorMessage(t *testing.T) {
 }
 
 func TestGetWorkspace_TaskCountsUsePublicFeatureID(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	feat := database.WorkspaceFeature{
 		FeatureName: "feature-1",
 		Title:       "Feature One",
@@ -571,7 +570,7 @@ func TestGetWorkspace_TaskCountsUsePublicFeatureID(t *testing.T) {
 }
 
 func TestSyncWorkspace_SuccessReturnsFreshData(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	svc := newService(db, &fakeAdapter{syncErr: nil})
 
@@ -585,7 +584,7 @@ func TestSyncWorkspace_SuccessReturnsFreshData(t *testing.T) {
 }
 
 func TestSyncWorkspace_FailureWithCachedData(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	syncErr := domain.NewAdapterError(domain.ErrAdapterTimeout, "timeout")
 	svc := newService(db, &fakeAdapter{syncErr: syncErr})
@@ -625,7 +624,7 @@ func TestImportWorkspace_AdapterError(t *testing.T) {
 }
 
 func TestImportWorkspace_Success(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	src := database.WorkspaceGitHubSource{RepoURL: "https://github.com/org/repo"}
 	_ = src.WorkspaceID.Scan(testWSID)
 	db := &fakeDB{
@@ -661,7 +660,7 @@ func TestImportWorkspace_ReturnsErrorWhenAdapterDoesNotPersistWorkspace(t *testi
 }
 
 func TestGetFeature_NotFound(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	svc := newService(db, &fakeAdapter{})
 
@@ -672,7 +671,7 @@ func TestGetFeature_NotFound(t *testing.T) {
 }
 
 func TestGetTask_NotFound(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	db := &fakeDB{workspaces: []database.Workspace{ws}}
 	svc := newService(db, &fakeAdapter{})
 
@@ -683,7 +682,7 @@ func TestGetTask_NotFound(t *testing.T) {
 }
 
 func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	feat := database.WorkspaceFeature{
 		FeatureName: "feature-1",
 		Title:       "Feature One",
@@ -730,7 +729,7 @@ func TestSearchTasks_TaskIDSortUsesWorkflowNumericOrder(t *testing.T) {
 }
 
 func TestSearchWorkspaceTasks_UsesQueryLayerAndPaginates(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	feat := database.WorkspaceFeature{
 		FeatureName: "feature-1",
 		Title:       "Feature One",
@@ -779,7 +778,7 @@ func TestSearchWorkspaceTasks_UsesQueryLayerAndPaginates(t *testing.T) {
 }
 
 func TestGetTask_Success(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	status := "in_progress"
 	blocked := false
 	_ = blocked
@@ -841,7 +840,7 @@ func TestGetTask_Success(t *testing.T) {
 }
 
 func TestGetWorkspaceTask_Success(t *testing.T) {
-	ws := makeUUID(testWSID)
+	ws := makeUUID()
 	status := "in_progress"
 	taskStatus := &status
 	repo := "workflow-backend"
