@@ -4,12 +4,9 @@ package database
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -174,44 +171,11 @@ func applyAdapterMigrations(ctx context.Context, t *testing.T, databaseURL, sche
 		t.Fatalf("ping migration db: %v", err)
 	}
 
-	if err := runGooseUp(ctx, migrationDB, adapterMigrationsDir(t)); err != nil {
-		t.Fatalf("apply workspace-github-adapter migrations: %v", err)
-	}
-}
-
-func runGooseUp(ctx context.Context, db *sql.DB, migrationsDir string) error {
+	goose.SetBaseFS(MigrationFS)
 	if err := goose.SetDialect("postgres"); err != nil {
-		return err
+		t.Fatalf("set goose dialect: %v", err)
 	}
-	goose.SetBaseFS(os.DirFS(filepath.Dir(migrationsDir)))
-	return goose.UpContext(ctx, db, filepath.Base(migrationsDir))
-}
-
-func adapterMigrationsDir(t *testing.T) string {
-	t.Helper()
-
-	if dir := os.Getenv("WORKSPACE_GITHUB_ADAPTER_MIGRATIONS_DIR"); dir != "" {
-		return verifiedMigrationsDir(t, dir)
+	if err := goose.UpContext(ctx, migrationDB, "migrations"); err != nil {
+		t.Fatalf("apply migrations: %v", err)
 	}
-
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve current test file")
-	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
-	dir := filepath.Join(repoRoot, "..", "workspace-github-adapter", "database", "migrations")
-	return verifiedMigrationsDir(t, dir)
-}
-
-func verifiedMigrationsDir(t *testing.T, dir string) string {
-	t.Helper()
-
-	info, err := os.Stat(dir)
-	if err != nil {
-		t.Fatalf("workspace-github-adapter migrations dir %q is not available: %v", dir, err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("workspace-github-adapter migrations path %q is not a directory", dir)
-	}
-	return dir
 }
