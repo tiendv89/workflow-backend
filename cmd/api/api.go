@@ -1,4 +1,5 @@
-package main
+// Package api provides the cobra subcommand for starting the HTTP API server.
+package api
 
 import (
 	"context"
@@ -9,12 +10,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/requestid"
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/spf13/cobra"
 
 	"github.com/tiendv89/workflow-backend/configs"
 	"github.com/tiendv89/workflow-backend/internal/adapter"
+	apimiddleware "github.com/tiendv89/workflow-backend/internal/app/api/middleware"
 	"github.com/tiendv89/workflow-backend/internal/database"
 	"github.com/tiendv89/workflow-backend/internal/handler"
 	"github.com/tiendv89/workflow-backend/internal/service"
@@ -22,54 +25,26 @@ import (
 
 const maxRequestBodyBytes = 1 << 20 // 1 MB
 
-func maxBodySizeMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
-		c.Next()
+var skipPaths = map[string]struct{}{
+	"/healthz": {},
+}
+
+// NewCommand returns the cobra command for the api subcommand.
+func NewCommand(cfg **configs.Config) *cobra.Command {
+	return &cobra.Command{
+		Use:   "api",
+		Short: "Start the HTTP API server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run(*cfg)
+		},
 	}
 }
 
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
-		c.Header("Access-Control-Max-Age", "86400")
-
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-
-		c.Next()
-	}
-}
-
-func main() {
-	cfgFile := "configs/config.yaml"
-	if v := os.Getenv("CONFIG_FILE"); v != "" {
-		cfgFile = v
-	}
-
-	cfg, err := configs.Load(cfgFile)
-	if err != nil {
-		// zerolog not initialized yet — use stderr directly
-		fmt.Fprintf(os.Stderr, "config: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Initialize zerolog.
-	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	level, err := zerolog.ParseLevel(cfg.Log.Level)
-	if err != nil {
-		level = zerolog.InfoLevel
-	}
-	zerolog.SetGlobalLevel(level)
-
+func run(cfg *configs.Config) error {
 	migCtx, migCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	if err := database.RunMigrations(migCtx, cfg.Database.URL); err != nil {
 		migCancel()
-		log.Fatal().Err(err).Msg("migrations failed")
+		return fmt.Errorf("migrations: %w", err)
 	}
 	migCancel()
 
@@ -77,7 +52,7 @@ func main() {
 	pool, err := database.Connect(connCtx, cfg.Database.URL)
 	connCancel()
 	if err != nil {
-		log.Fatal().Err(err).Msg("database connect failed")
+		return fmt.Errorf("database: %w", err)
 	}
 	defer pool.Close()
 
@@ -90,9 +65,12 @@ func main() {
 	}
 
 	r := gin.New()
+	r.Use(requestid.New())
+	r.Use(apimiddleware.Log(skipPaths))
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware())
 	r.Use(maxBodySizeMiddleware())
+
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -109,8 +87,8 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	done := make(chan os.Signal, 1)
-	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	go func() {
 		log.Info().Int("port", cfg.API.Port).Msg("api-service listening")
@@ -119,7 +97,7 @@ func main() {
 		}
 	}()
 
-	<-done
+	<-ctx.Done()
 	log.Info().Msg("api-service: shutting down")
 
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -127,5 +105,27 @@ func main() {
 
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Error().Err(err).Msg("shutdown error")
+	}
+	return nil
+}
+
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+		c.Header("Access-Control-Max-Age", "86400")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
+}
+
+func maxBodySizeMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
+		c.Next()
 	}
 }
