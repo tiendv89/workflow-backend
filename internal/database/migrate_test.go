@@ -64,3 +64,27 @@ func TestRunMigrationsReturnsErrorOnInvalidDatabaseURL(t *testing.T) {
 		t.Fatal("expected error for invalid database URL, got nil")
 	}
 }
+
+func TestMigrateUpNReturnsErrorOnInvalidDatabaseURL(t *testing.T) {
+	ctx := t.Context()
+	for _, n := range []int{0, 1, 3} {
+		if err := MigrateUpN(ctx, "not-a-valid-url", n); err == nil {
+			t.Errorf("MigrateUpN(n=%d): expected error for invalid URL, got nil", n)
+		}
+	}
+}
+
+func TestMigrateDownNReturnsErrorOnInvalidDatabaseURL(t *testing.T) {
+	ctx := t.Context()
+	if err := MigrateDownN(ctx, "not-a-valid-url", 1); err == nil {
+		t.Fatal("expected error for invalid database URL, got nil")
+	}
+}
+
+func TestMigrateDownNZeroStepsIsNoOp(t *testing.T) {
+	ctx := t.Context()
+	// n=0: no iterations, no db call — returns nil immediately
+	if err := MigrateDownN(ctx, "not-a-valid-url", 0); err != nil {
+		t.Fatalf("MigrateDownN with 0 steps should be a no-op, got error: %v", err)
+	}
+}

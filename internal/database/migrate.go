@@ -42,8 +42,11 @@ func MigrateUpN(ctx context.Context, databaseURL string, n int) error {
 	return nil
 }
 
-// MigrateDownN rolls back n migrations.
+// MigrateDownN rolls back n migrations. n=0 is a no-op.
 func MigrateDownN(ctx context.Context, databaseURL string, n int) error {
+	if n == 0 {
+		return nil
+	}
 	db, err := openMigrationDB(databaseURL)
 	if err != nil {
 		return err
