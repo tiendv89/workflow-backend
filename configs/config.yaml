@@ -2,7 +2,9 @@ log:
   level: info
 
 api:
-  port: 8081
+  http:
+    address: ":8080"
+    mode: debug
   stale_threshold_minutes: 30
   adapter_service_url: "http://adapter-service:8080"
 

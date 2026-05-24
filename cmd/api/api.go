@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+
 	"github.com/tiendv89/workflow-backend/configs"
 	"github.com/tiendv89/workflow-backend/internal/adapter"
 	apimiddleware "github.com/tiendv89/workflow-backend/internal/app/api/middleware"
@@ -38,12 +39,14 @@ var Command = &cobra.Command{
 }
 
 func run(cfg *configs.Config) error {
-	migCtx, migCancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	if err := database.RunMigrations(migCtx, cfg.DB.DSN()); err != nil {
+	if cfg.DB.AutoMigration {
+		migCtx, migCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		if err := database.RunMigrations(migCtx, cfg.DB.DSN()); err != nil {
+			migCancel()
+			return fmt.Errorf("migrations: %w", err)
+		}
 		migCancel()
-		return fmt.Errorf("migrations: %w", err)
 	}
-	migCancel()
 
 	connCtx, connCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	pool, err := database.Connect(connCtx, cfg.DB)
@@ -57,9 +60,7 @@ func run(cfg *configs.Config) error {
 	adapterClient := adapter.New(cfg.API.AdapterServiceURL)
 	svc := service.New(reader, adapterClient, cfg.StaleThreshold())
 
-	if os.Getenv("GIN_MODE") == "" {
-		gin.SetMode(gin.ReleaseMode)
-	}
+	gin.SetMode(cfg.API.HTTP.Mode)
 
 	r := gin.New()
 	r.Use(requestid.New())
@@ -77,7 +78,7 @@ func run(cfg *configs.Config) error {
 	h.RegisterRoutes(api)
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.API.Port),
+		Addr:         cfg.API.HTTP.Address,
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -88,7 +89,7 @@ func run(cfg *configs.Config) error {
 	defer stop()
 
 	go func() {
-		log.Info().Int("port", cfg.API.Port).Msg("api-service listening")
+		log.Info().Str("address", cfg.API.HTTP.Address).Msg("api-service listening")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("listen failed")
 		}

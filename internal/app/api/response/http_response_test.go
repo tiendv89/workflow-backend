@@ -1,6 +1,7 @@
 package response_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,7 @@ func init() {
 func newContext() (*gin.Context, *httptest.ResponseRecorder) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil)
 	c.Request = req
 	return c, w
 }
@@ -27,7 +28,7 @@ func newContext() (*gin.Context, *httptest.ResponseRecorder) {
 func newContextWithQuery(query string) (*gin.Context, *httptest.ResponseRecorder) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest(http.MethodGet, "/?"+query, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "/?"+query, nil)
 	c.Request = req
 	return c, w
 }

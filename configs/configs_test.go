@@ -49,7 +49,9 @@ func TestLoad_MissingDBHost(t *testing.T) {
 log:
   level: info
 api:
-  port: 8081
+  http:
+    address: ":8081"
+    mode: release
 db:
   host: ""
 `)
@@ -64,7 +66,9 @@ func TestLoad_ValidConfig(t *testing.T) {
 log:
   level: debug
 api:
-  port: 9090
+  http:
+    address: ":9090"
+    mode: debug
   stale_threshold_minutes: 60
   adapter_service_url: "http://my-adapter:8000"`+validDBConfig)
 	cfg, err := configs.Load(p)
@@ -74,8 +78,11 @@ api:
 	if cfg.Log.Level != "debug" {
 		t.Errorf("expected log.level=debug, got %q", cfg.Log.Level)
 	}
-	if cfg.API.Port != 9090 {
-		t.Errorf("expected api.port=9090, got %d", cfg.API.Port)
+	if cfg.API.HTTP.Address != ":9090" {
+		t.Errorf("expected api.http.address=:9090, got %q", cfg.API.HTTP.Address)
+	}
+	if cfg.API.HTTP.Mode != "debug" {
+		t.Errorf("expected api.http.mode=debug, got %q", cfg.API.HTTP.Mode)
 	}
 	if cfg.API.StaleThresholdMinutes != 60 {
 		t.Errorf("expected stale_threshold_minutes=60, got %d", cfg.API.StaleThresholdMinutes)
@@ -101,25 +108,17 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Log.Level != "info" {
 		t.Errorf("expected default log.level=info, got %q", cfg.Log.Level)
 	}
-	if cfg.API.Port != 8081 {
-		t.Errorf("expected default port=8081, got %d", cfg.API.Port)
+	if cfg.API.HTTP.Address != ":8081" {
+		t.Errorf("expected default api.http.address=:8081, got %q", cfg.API.HTTP.Address)
+	}
+	if cfg.API.HTTP.Mode != "release" {
+		t.Errorf("expected default api.http.mode=release, got %q", cfg.API.HTTP.Mode)
 	}
 	if cfg.API.StaleThresholdMinutes != 30 {
 		t.Errorf("expected default stale_threshold_minutes=30, got %d", cfg.API.StaleThresholdMinutes)
 	}
 	if cfg.API.AdapterServiceURL != "http://adapter-service:8080" {
 		t.Errorf("expected default adapter_service_url, got %q", cfg.API.AdapterServiceURL)
-	}
-}
-
-func TestLoad_InvalidPort(t *testing.T) {
-	p := writeConfigFile(t, validDBConfig+`
-api:
-  port: 99999
-`)
-	_, err := configs.Load(p)
-	if err == nil {
-		t.Error("expected error for port > 65535")
 	}
 }
 

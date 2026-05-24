@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/viper"
+
 	"github.com/tiendv89/workflow-backend/pkg/db"
 )
 
@@ -28,9 +29,15 @@ type LogConfig struct {
 
 // APIConfig holds HTTP server settings.
 type APIConfig struct {
-	Port                  int
-	StaleThresholdMinutes int    `mapstructure:"stale_threshold_minutes"`
-	AdapterServiceURL     string `mapstructure:"adapter_service_url"`
+	HTTP                  HTTPConfig `mapstructure:"http"`
+	StaleThresholdMinutes int        `mapstructure:"stale_threshold_minutes"`
+	AdapterServiceURL     string     `mapstructure:"adapter_service_url"`
+}
+
+// HTTPConfig holds the HTTP listener settings.
+type HTTPConfig struct {
+	Address string `mapstructure:"address"`
+	Mode    string `mapstructure:"mode"`
 }
 
 // Init loads config from path into the global G variable, panicking on error.
@@ -56,7 +63,8 @@ func Load(path string) (*Config, error) {
 	v.AutomaticEnv()
 
 	v.SetDefault("log.level", "info")
-	v.SetDefault("api.port", 8081)
+	v.SetDefault("api.http.address", ":8081")
+	v.SetDefault("api.http.mode", "release")
 	v.SetDefault("api.stale_threshold_minutes", 30)
 	v.SetDefault("api.adapter_service_url", "http://adapter-service:8080")
 
@@ -72,8 +80,8 @@ func Load(path string) (*Config, error) {
 	if cfg.DB.Host == "" {
 		return nil, fmt.Errorf("db.host is required")
 	}
-	if cfg.API.Port < 1 || cfg.API.Port > 65535 {
-		return nil, fmt.Errorf("api.port must be between 1 and 65535, got %d", cfg.API.Port)
+	if cfg.API.HTTP.Address == "" {
+		return nil, fmt.Errorf("api.http.address is required")
 	}
 	if cfg.API.StaleThresholdMinutes < 0 {
 		return nil, fmt.Errorf("api.stale_threshold_minutes must be >= 0, got %d", cfg.API.StaleThresholdMinutes)

@@ -26,41 +26,46 @@ const baseConfig = `
 log:
   level: info
 api:
-  port: 8081
+  http:
+    address: ":8081"
+    mode: release
   stale_threshold_minutes: 30
   adapter_service_url: "http://adapter-service:8080"
-database:
-  url: "postgresql://localhost/test"
+db:
+  host: localhost
+  port: 5432
+  db_name: testdb
+  user: testuser
+  password: testpass
 `
 
-// TestConfig_RequiresDatabaseURL verifies that missing database.url is rejected at startup.
-func TestConfig_RequiresDatabaseURL(t *testing.T) {
+// TestConfig_RequiresDBHost verifies that missing db.host is rejected at startup.
+func TestConfig_RequiresDBHost(t *testing.T) {
 	p := writeConfig(t, `
 log:
   level: info
 api:
-  port: 8081
-database:
-  url: ""
+  http:
+    address: ":8081"
+    mode: release
+db:
+  host: ""
 `)
 	_, err := configs.Load(p)
 	if err == nil {
-		t.Error("expected error when database.url is empty")
+		t.Error("expected error when db.host is empty")
 	}
 }
 
 // TestConfig_Defaults verifies that defaults are applied when keys are absent.
 func TestConfig_Defaults(t *testing.T) {
-	p := writeConfig(t, `
-database:
-  url: "postgresql://localhost/test"
-`)
+	p := writeConfig(t, baseConfig)
 	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.API.Port != 8081 {
-		t.Errorf("expected default port 8081, got %d", cfg.API.Port)
+	if cfg.API.HTTP.Address != ":8081" {
+		t.Errorf("expected api.http.address=:8081, got %q", cfg.API.HTTP.Address)
 	}
 	if cfg.API.StaleThresholdMinutes != 30 {
 		t.Errorf("expected default stale threshold 30, got %d", cfg.API.StaleThresholdMinutes)
@@ -70,55 +75,42 @@ database:
 	}
 }
 
-// TestConfig_CustomPort verifies the api.port key is parsed correctly from YAML.
-func TestConfig_CustomPort(t *testing.T) {
-	p := writeConfig(t, `
-database:
-  url: "postgresql://localhost/test"
+// TestConfig_CustomAddress verifies api.http.address is parsed correctly from YAML.
+func TestConfig_CustomAddress(t *testing.T) {
+	p := writeConfig(t, baseConfig+`
 api:
-  port: 9090
+  http:
+    address: ":9090"
+    mode: debug
 `)
 	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.API.Port != 9090 {
-		t.Errorf("expected port 9090, got %d", cfg.API.Port)
+	if cfg.API.HTTP.Address != ":9090" {
+		t.Errorf("expected api.http.address=:9090, got %q", cfg.API.HTTP.Address)
+	}
+	if cfg.API.HTTP.Mode != "debug" {
+		t.Errorf("expected api.http.mode=debug, got %q", cfg.API.HTTP.Mode)
 	}
 }
 
 // TestConfig_EnvOverride verifies that env vars override YAML values.
 func TestConfig_EnvOverride(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgresql://envhost/envdb")
+	t.Setenv("DB_HOST", "envhost")
 	p := writeConfig(t, baseConfig)
 	cfg, err := configs.Load(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Database.URL != "postgresql://envhost/envdb" {
-		t.Errorf("expected env override for database.url, got %q", cfg.Database.URL)
-	}
-}
-
-// TestConfig_InvalidPort verifies port validation.
-func TestConfig_InvalidPort(t *testing.T) {
-	p := writeConfig(t, `
-database:
-  url: "postgresql://localhost/test"
-api:
-  port: 99999
-`)
-	_, err := configs.Load(p)
-	if err == nil {
-		t.Error("expected error for out-of-range port")
+	if cfg.DB.Host != "envhost" {
+		t.Errorf("expected env override for db.host, got %q", cfg.DB.Host)
 	}
 }
 
 // TestConfig_NegativeStaleThreshold verifies negative stale threshold is rejected.
 func TestConfig_NegativeStaleThreshold(t *testing.T) {
-	p := writeConfig(t, `
-database:
-  url: "postgresql://localhost/test"
+	p := writeConfig(t, baseConfig+`
 api:
   stale_threshold_minutes: -1
 `)
@@ -130,9 +122,7 @@ api:
 
 // TestConfig_StaleThresholdDuration verifies StaleThreshold() returns the right duration.
 func TestConfig_StaleThresholdDuration(t *testing.T) {
-	p := writeConfig(t, `
-database:
-  url: "postgresql://localhost/test"
+	p := writeConfig(t, baseConfig+`
 api:
   stale_threshold_minutes: 60
 `)

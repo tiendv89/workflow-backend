@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tiendv89/workflow-backend/internal/database"
-	"github.com/tiendv89/workflow-backend/pkg/testhelpers"
 
+	"github.com/tiendv89/workflow-backend/internal/database"
 	"github.com/tiendv89/workflow-backend/internal/domain"
 	"github.com/tiendv89/workflow-backend/internal/handler"
 	"github.com/tiendv89/workflow-backend/internal/service"
+	"github.com/tiendv89/workflow-backend/pkg/testhelpers"
 )
 
 const (

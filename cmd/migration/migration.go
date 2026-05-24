@@ -8,9 +8,9 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
-	"github.com/tiendv89/workflow-backend/internal/database"
 
 	"github.com/tiendv89/workflow-backend/configs"
+	"github.com/tiendv89/workflow-backend/internal/database"
 )
 
 var (

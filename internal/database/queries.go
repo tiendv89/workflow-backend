@@ -283,9 +283,9 @@ func (r *Reader) ListFeatureTaskCounts(ctx context.Context, workspaceID string, 
 	args[0] = uid
 	placeholders := make([]string, 0, len(featureIDs))
 	for _, featureID := range featureIDs {
-		fid, err := parseUUID(featureID)
-		if err != nil {
-			return nil, err
+		fid, parseErr := parseUUID(featureID)
+		if parseErr != nil {
+			return nil, parseErr
 		}
 		args = append(args, fid)
 		placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
